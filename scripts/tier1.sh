@@ -60,7 +60,8 @@ scripts/lint-pipefail.sh
 scripts/lint-proof-eval.sh --selftest
 
 # 1d. Every declared long runner (scripts/long-runners.txt) runs under scripts/run-scoped.sh (a transient systemd scope with a bound, reaped on exit: an aborted run cannot orphan);
-# (a guard against accidents: evasion by indirection is a stated limit of the lint). The lint has fixture self-tests (a direct call fails, a scoped call passes), run here with `--selftest`; the helper's own test is scripts/test_run_scoped.sh (3i).
+# the lint has fixture self-tests (a direct call fails, a scoped call passes), run here with `--selftest`; the helper's own test is scripts/test_run_scoped.sh (3i).
+# (a guard against accidents: evasion by indirection is a stated limit of this lint, not a hole it claims to close)
 scripts/lint-scoped-runners.sh --selftest
 
 # 2. Build both libraries; warningAsError is set in lakefile.lean, so any warning fails. The mechanism is checked: the option is set, and a file with a warning fails under it.
