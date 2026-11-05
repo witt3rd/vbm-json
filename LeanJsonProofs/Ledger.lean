@@ -3,6 +3,8 @@ import LeanJsonProofs.Print
 import LeanJsonProofs.Policy
 import LeanJsonProofs.Fast
 import LeanJsonProofs.FastLoop
+import LeanJsonProofs.Stage1
+import LeanJsonProofs.ParseSimd
 /-! # The obligation ledger
 
 Every claim the library makes, keyed by a slug. A claim is `proved` only by naming theorems (double-backtick names are checked at
@@ -39,6 +41,9 @@ def ledger : List Obligation := [
   -- the fast parser
   O "fast-parser-refines-reference" (.proved [``LeanJson.parseFast_eq_parse]),
   O "fast-parser-terminates-in-bounded-space" (.open_ "the loop `run` is total (structural recursion on its fuel, and `run_sound` shows the fuel a.size + 2 is enough) and is a self tail call (the emitted C is a loop: `goto _start`, checked by reading the C, not proved); the explicit stack's depth is bounded by maxDepth by the budget `d`, which is NOT proved as a separate invariant (only its consequence: an accepted value has depth at most maxDepth, `parseFast_sound`)"),
+  -- the bit-parallel structural stage (docs/perf/simd-plan.md): not an export yet, so these say what the code in the tree computes, not what a binding runs
+  O "simd-structural-stage-is-the-byte-machine" (.proved [``LeanJsonProofs.stage1_spec, ``LeanJsonProofs.stage1_stream]),
+  O "simd-parser-equals-scalar-parser" (.proved [``LeanJsonProofs.parseTapeSimd_eq]),
   -- the policies (PROPOSED, owner ratification pending: docs/decisions/0001-vbm-json.md)
   O "policy-no-lone-surrogates-no-invalid-utf8" (.partly [``LeanJson.utf8_scalar, ``LeanJson.esc_scalar, ``LeanJson.chars_scalar, ``LeanJson.lone_high_surrogate_rejected, ``LeanJson.lone_low_surrogate_rejected, ``LeanJson.overlong_utf8_rejected, ``LeanJson.utf8_surrogate_rejected, ``LeanJson.surrogate_pair_is_one_scalar, ``LeanJson.parseFast_lone_high_surrogate_rejected, ``LeanJson.parseFast_lone_low_surrogate_rejected, ``LeanJson.parseFast_overlong_utf8_rejected, ``LeanJson.parseFast_utf8_surrogate_rejected, ``LeanJson.parseFast_surrogate_pair_is_one_scalar] "strict: both rejected (RFC 8259 permits either; I-JSON forbids). Proved of the grammar relation: every derived scalar is a Unicode scalar value; and of the fast parser, by `parseFast_eq_parse`: the named inputs are rejected and a surrogate pair is one scalar. Open: a general theorem over every input with a lone surrogate or invalid UTF-8 (the examples and the grammar carry it; the differential and the exhaustive vectors test it)"),
   O "policy-numbers-are-lexemes" (.partly [``LeanJson.number_is_a_lexeme, ``LeanJson.leading_zero_rejected, ``LeanJson.parseFast_number_is_a_lexeme, ``LeanJson.parseFast_leading_zero_rejected] "numbers kept as sign, digits, exponent lexemes; no floats in the core. Checked by the type (Number) and by examples of the reference and of the fast parser"),
