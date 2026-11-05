@@ -1,0 +1,183 @@
+# The trust ledger
+
+One file listing **everything outside our direct control that vbm-json executes or depends on**: code we did not prove, code we did not write, and facilities we
+assume. It exists because verified by construction is the first priority of the project: the size of the unverified base and the handling of
+its boundary is the most critical measure. A boundary with no entry here does not land (`scripts/trust-ledger-check.sh`, Tier 1). The pattern is borrowed from the project the gates were first built in (`docs/trust-ledger.md`
+there); only the derivation of the required set differs.
+
+**Snapshot at the commit that added this file:** skeleton, no library code. The closure of the exports is empty (`scripts/closure-entries.txt` has no entry points): specified
+share n/a, executed mass 0. The ledger below covers what the *build* depends on. The trusted pieces that arrive with the library are listed under "Planned" and move up into
+numbered entries in the PR that adds each one.
+
+**Snapshot at the fast parser (PR 2):** the closure has one entry point, `LeanJson.parseFast` (`scripts/closure-entries.txt`): 60 definitions of `LeanJson` (mass 15065 expression nodes), 420 of `Init`
+(the toolchain, entry T01's runtime), nothing else; specified share 15065/15065 (100%: the share only says where the code lives, the proof is `parseFast_eq_parse`), unverified 0. The fast parser adds **no new
+boundary** (no extern, no C file, no loader, no tool): the entries below are unchanged. What it newly trusts is T01 (the Lean compiler's C for `parseFast` has the semantics of the Lean definition that was proved), checked by the
+differential and the shared vectors, not by proof.
+
+**Snapshot at the WASM build:** two new entries, T10 (`runtime/rt.c`, the freestanding runtime of the wasm32 module, about 330 lines of C) and T11 (Node.js as the test runtime); `scripts/test_wasm.sh` checks the module against the reference and the native ABI.
+
+**Snapshot at the freestanding native build:** no new entry; T09 and T10 change. The native library is now built like the wasm module (`scripts/build_native.sh`): the generated C, `abi/vbm_json.c` and the ONE runtime `runtime/rt.c`, `-ffreestanding -nostdlib`, so `nm -u` of the artifact is empty (before: `free`, `malloc`, `memcpy`, `memset`, `pthread_once`, all from the shim). `rt.c` now also carries `memcpy`, `memmove`, `memset` (native: loops the compiler may not turn back into calls; the compiler emits calls to them even from freestanding code) and a static arena instead of linear memory. `abi/lean_mini.h` is new trusted C (T09). `scripts/test_native.sh` runs the vectors and the whole ABI test against the freestanding library and checks the symbols.
+
+**Snapshot at the C ABI, slice 1:** one new entry, T09 (`abi/vbm_json.c`, about 90 lines of C: the only new trusted code); `scripts/test_abi.sh` runs it against the reference in Tier 1. The closure has a second entry point,
+`LeanJson.parseTape` (the export `vbm_json_parse_tape`); the specified share is 18916/18916 (100%): `LeanJson/Tape.lean` lives in the specification module but has **no proof yet** (the layout theorem is slice 2), so for that code the
+share says where it lives and the test says whether it is right. The tool `leanc` joins the watch-list (covered by T04).
+
+## How the gate keeps this file true
+
+The set of things that must appear here is **derived from the tree, not from this file**: every `@[extern]` symbol in `LeanJson/` and `abi/`, every file under `runtime/*.c`,
+every hand-written binding loader (`bindings/*/loader.*`), every `.github/workflows/` file, the build pins (`lean-toolchain`, `mise.toml`, `lakefile.lean`), the Lean pin's
+compiler, runtime and bundled clang/ld.lld (the keys `lean-compiler`, `lean-runtime`, `clang-lld`), every closure module that is neither `LeanJson` nor `Init`
+(`scripts/ClosureGate.lean --emit`), and a watch-list of tools the scripts run. Each is a key (`file:`, `extern:`, `module:`, `tool:`, plus the three Lean keys) that an entry must name on its **Covers** line.
+- A new boundary (extern, C file, loader, workflow, tool) with no entry **fails**. Moving code between closure classes does not remove it from the required set.
+- A `Covers` key that names nothing real fails (a stale or invented cover), and **removing any entry fails** (the gate does this to itself on every run, one entry at a time: an entry that
+  covers nothing required is padding). Dangling file references fail. An entry needs all seven fields, a **Plan** from `verify | replace | sandbox | accept`, and `accept` needs
+  `because ...`. **Assumes** must link a written contract or say `no written contract` (counted as a gap); **Test** must name a test that can fail or say `none` (counted as a gap).
+- Not covered by the gate (say so rather than pretend): a tool called from a script that is not on the watch-list in `scripts/trust-ledger-check.sh`, and the *quality* of an entry's prose.
+  Planned entries (below) are prose until their file exists; nothing stops one from being forgotten except the review of the PR that adds the file.
+
+The count printed on every run and in the Tier 1 log `scripts/land-direct` keeps: `trust ledger: N entries (... gaps)`.
+
+Entry format: **What** it is; **Enters** where it enters; **Assumes** what we assume of it (the contract); **Test** the test that can fail; **Owner**; **Plan**.
+
+## The Lean toolchain (pinned: 4.35.0, one Lean release for the whole tree)
+
+### T01. The Lean compiler: frontend, kernel, C emitter
+- **What:** the `lean` release pinned in `lean-toolchain` and `mise.toml`: the elaborator, the kernel that checks every proof, and `EmitC`, which turns our definitions into the C that becomes the portable artifact. A kernel soundness bug would void the proofs; an emitter bug would give the C different semantics from the Lean. Nothing proves the emitter preserves semantics (decision 0001, the extractor survey).
+- **Enters:** `lean-toolchain`, `mise.toml`; every `.lean` file.
+- **Assumes:** the kernel is sound and `EmitC` is faithful: no written contract beyond Lean's own documentation. The shared vectors (generated by the Lean reference, run in every binding) are the check on the emitted code; `leanchecker` and nanoda are the checks on the kernel (T02).
+- **Test:** scripts/tier2.sh (leanchecker `--fresh`, nanoda); the emitter is checked only by the vectors, which arrive with the library (none yet).
+- **Owner:** upstream Lean (leanprover/lean4); the owner pins it (CODEOWNERS: `lean-toolchain`, `mise.toml`).
+- **Plan:** accept, because there is no other mature route from Lean to C, WASM and the other targets (decision 0001: the honest extractor survey) and the kernel is small and independently re-checked; revisit when an extractor with a semantics-preservation proof exists.
+- **Covers:** `lean-compiler` `file:lean-toolchain` `file:mise.toml`
+
+### T02. The independent proof checkers: leanchecker, nanoda
+- **What:** `leanchecker --fresh` replays every declaration in a fresh environment (guards a tampered or stale `.olean`); nanoda (`nanoda_bin`, shipped in the Lean release) re-checks the exported proof with an independent kernel implementation.
+- **Enters:** `scripts/tier2.sh` (run by CI after merge); they read the build products and the `leanexport` of `LeanJson` and `LeanJsonProofs`.
+- **Assumes:** that two independent checkers agreeing is evidence the kernel did not mis-accept; no written contract.
+- **Test:** none that can fail on a bad proof here (no proofs yet); Tier 2 itself is the test once theorems exist, and a deliberately false theorem in a scratch file is the planned negative test.
+- **Owner:** upstream Lean; the owner approves the tier script (CODEOWNERS via the protected set).
+- **Plan:** verify. Add a negative self-test (a corrupted export must fail nanoda) when the first proofs land.
+- **Covers:** `tool:leanchecker` `tool:nanoda`
+
+### T03. The Lean runtime and its headers (lean.h, libleanrt)
+- **What:** the C runtime every Lean-emitted C file links: reference counting, allocation, arrays and strings, big numbers (`lean.h`, `libleanrt`, `libleanshared`). It is the lowest layer under the library's compiled code, in every binding. It is not checked by us.
+- **Enters:** the Lean release pinned in `lean-toolchain`; the emitted C of `LeanJson` includes `lean.h`; for WASM and the freestanding build a small allocator shim replaces the allocator (Planned P1).
+- **Assumes:** the runtime implements Lean's object model correctly; no written contract.
+- **Test:** none of ours: it is exercised only through the vectors (none yet). The generated-C gate and the allocation ratchet of the originating gates are not carried over yet: they arrive with the first emitted C.
+- **Owner:** upstream Lean; the owner pins the version.
+- **Plan:** accept, because the runtime is part of the one Lean release we pin and no verified replacement exists; keep the closure Init-only so the part of it that runs is small (scripts/ClosureGate.lean forbids `Std` and `Lean` in the exports' closure).
+- **Covers:** `lean-runtime`
+
+### T04. clang and ld.lld (the compiler and linker the Lean release bundles)
+- **What:** the C compiler and linker bundled in the Lean release (`bin/clang`, `bin/ld.lld`), used by `lake`/`leanc` to compile Lean's emitted C into objects and static libraries (and, with `leanc`, the C edge and its test, `scripts/test_abi.sh`, with the system headers: the bundle has no libc headers), and later to produce `core.wasm` and the shared libraries. A miscompile here changes the program the proofs were about.
+- **Enters:** `lean-toolchain` (the bundle comes with the pin); `lakefile.lean` (every `lean_lib` build).
+- **Assumes:** the compiler preserves C semantics for the emitted code; no written contract. The pins (Lean and clang versions, recorded in `manifest.json` with the artifact hashes) are planned with the packaging.
+- **Test:** none of ours today; the vectors run against the compiled artifact, which is the real check (none yet). A reproducible-build check (two builds, one sha256) is planned with the packaging.
+- **Owner:** upstream LLVM via the Lean release; the owner pins it.
+- **Plan:** sandbox. Check the compiled artifact against the reference with the shared vectors in CI, never trust the compile; no replacement is planned.
+- **Covers:** `clang-lld` `tool:leanc`
+
+## The build and process tools
+
+### T05. Lake and the build file
+- **What:** `lake` (shipped in the Lean release) reads `lakefile.lean` and builds both libraries; the file sets `warningAsError` and `autoImplicit false` and declares the two module roots (`LeanJson`, `LeanJsonProofs`), the first Init-only.
+- **Enters:** `lakefile.lean`; every `lake build` and `lake env lean --run` in `scripts/`.
+- **Assumes:** the build builds the files that are in the tree and nothing else; the root split and the Init-only rule are enforced by Tier 1, not by Lake (scripts/tier1.sh: the import scan).
+- **Test:** scripts/tier1.sh (zero-warning check with its negative case; the import scan with its negative cases).
+- **Owner:** the owner (CODEOWNERS: `lakefile.lean`).
+- **Plan:** accept, because Lake is the Lean toolchain's own build tool and a change to it is a toolchain change (T01).
+- **Covers:** `file:lakefile.lean` `tool:lake`
+
+### T06. mise: installs the pinned Lean release
+- **What:** `mise` downloads and installs the Lean release tarball named in `mise.toml` from GitHub releases and puts it on `PATH` for `mise exec -- ...`.
+- **Enters:** `mise.toml`; every script is run as `mise exec -- scripts/...`.
+- **Assumes:** the tarball is the one released for that tag; no checksum is verified by us today (no written contract): this is a supply-chain gap.
+- **Test:** none: nothing here can fail if the tarball were swapped (a gap, counted).
+- **Owner:** the owner (`mise.toml` is in the protected set); mise is upstream.
+- **Plan:** sandbox. Pin the release checksum in `mise.toml` (a lockfile) once the CI exists; until then the tarball's integrity is GitHub's.
+- **Covers:** `tool:mise`
+
+### T07. git, gh, flock, python3, Worktrunk: the optional process tooling
+- **What:** `git` and `gh` (the red-check and the rebase and push steps of `scripts/land-direct`), `flock` (the lander's mutex), `python3` (the trust-ledger checker), `wt` (Worktrunk: worktrees, `scripts/wt`). They run on the developer's machine and in CI; none is part of any artifact.
+- **Enters:** `scripts/land-direct`, `scripts/wt`, `scripts/trust_ledger.py`, `scripts/trust-ledger-check.sh`, the Tier 1 scripts.
+- **Assumes:** they do what their manuals say; the self-tests of the scripts that use them (scratch repos, a `gh` shim) are the check that our use of them is right; no written contract.
+- **Test:** scripts/test_land_direct.sh, scripts/test_protected_set.sh, scripts/test_githook.sh (each runs the real script against a scratch repository).
+- **Owner:** upstream tools; the owner approves the scripts (protected set).
+- **Plan:** accept, because they touch the process and not the artifact: a compromised tool could land a bad change, which the gates and the owner's review of protected paths are there to catch.
+- **Covers:** `tool:git` `tool:gh` `tool:flock` `tool:python3` `tool:wt`
+
+### T08. The CI runner and workflow actions (GitHub Actions: core.yml)
+- **What:** `.github/workflows/core.yml` runs `scripts/tier1.sh` on every push to `main`, and `scripts/tier2.sh` every 6 hours (schedule) and on manual dispatch, on GitHub-hosted `ubuntu-latest` runners only (never self-hosted: `scripts/lint-workflows.py` fails Tier 1 on a self-hosted label, on a `pull_request_target` trigger and on any secret other than the default token). The workflow has no pull-request trigger, so a fork's code never runs with the repository's token. The runner image supplies `git`, `python3` (with PyYAML), `node`, `cargo` and the C library headers; the pinned Lean, with its clang, lld, `leanchecker` and `nanoda_bin`, comes from `mise install`. Pushes touching only `*.md` files other than the three ledgers Tier 1 reads skip CI. It uses three third-party actions pinned by commit sha (a comment names the tag): `actions/checkout` v4, `actions/cache` v4 (restores `.lake`, keyed on `lake-manifest.json` and a hash of `LeanJson/` and `LeanJsonProofs/`) and `jdx/mise-action` v2 (installs mise and the pinned Lean). Token: the default `GITHUB_TOKEN`, `contents: read`; no secrets.
+- **Enters:** `.github/workflows/core.yml`; every Tier 1 and Tier 2 run in CI. The workflow runs only on GitHub: it cannot be run here.
+- **Assumes:** the runner image, the pinned action commits and the cache behave as documented; a cache hit is only a speed-up (the build is incremental, Tier 1 rebuilds with zero warnings and the gates re-derive everything), but a poisoned cache or a compromised upstream action could change what is checked. No written contract beyond GitHub's documentation. A green `tier1` is evidence only while branch protection requires it (`docs/branch-protection.md`).
+- **Test:** none that can fail inside this repository (the workflow cannot run locally); the check that the workflow exists and is covered here is `scripts/trust-ledger-check.sh` (a `.github/workflows/*` file with no entry fails Tier 1).
+- **Owner:** the owner (`.github/workflows/` is in the protected set and CODEOWNERS); the actions are upstream (GitHub, jdx).
+- **Plan:** sandbox. Keep the permissions read-only and secret-free; the three actions are pinned to commit shas; the cache never replaces the gates.
+- **Covers:** `file:.github/workflows/core.yml`
+
+## The C ABI (slice 1)
+
+### T09. The C edge of the ABI: abi/vbm_json.c (and include/vbm_json.h)
+- **What:** about 90 lines of new trusted, unverified C. `vbm_json_parse` copies the caller's bytes into a Lean `ByteArray`, calls the Lean export `vbm_json_parse_tape` (`LeanJson/Tape.lean`: the parse, the policies and the tape layout are decided there, in Lean), checks the sizes in the result header, and copies the tape and text into one block from the embedder's allocator (default: a Lean `ByteArray` payload; no libc); `vbm_json_free` releases it. It also initialises the Lean runtime once (`pthread_once`, via the module initialiser `initialize_vbm_x2djson_LeanJson_Tape`, a name Lean 4.35 generates). It decides nothing about JSON (the boundary never decides) but it holds memory: a wrong size or a missed free is a memory-safety bug no Lean proof covers. Not covered by the allocator hook: the Lean runtime's own heap (it aborts on out-of-memory; empty again when `vbm_json_parse` returns). Concurrent calls are untested.
+- **Enters:** `abi/vbm_json.c`, `include/vbm_json.h`; every embedder and, later, every binding and the WASM build (which replace libc `malloc` by the allocator shim, T10).
+- **Assumes:** the contract in `include/vbm_json.h` (result codes, tape layout, ownership) and the tape layout described in `LeanJson/Tape.lean`; the Lean export has the C signature `lean_object *vbm_json_parse_tape(lean_object *)` and the result header `status, words, text` (3 little-endian u64) of `LeanJson/Tape.lean`; a little-endian host (a static assertion refuses others).
+- **Test:** `scripts/test_abi.sh` (`tests/abi_test.c`): every shared vector (43426 rows, the JSONTestSuite included) through `vbm_json_parse`, an accepted row's tape read back by an independent strict reader to the reference's canonical bytes, 100000-deep input is `VBM_JSON_DEPTH`, a failing allocator is `VBM_JSON_NOMEM` with every block released, no resident growth over 30000 parses; negative self-tests (corrupted verdict, code and canonical form, a deliberate leak, two shim mutants) each fail.
+- **Owner:** the owner (`abi/` is in the protected set); written by the agent of the ABI task.
+- **Plan:** verify. Slice 2 writes the tape layout as a Lean specification with encode/decode and proves the reader recovers the `Value` (decision 0001 section 1.2); after that the C holds only the buffer copy and the allocator call, the part to harden by the same mutants and a sanitizer build, and to replace on WASM by the freestanding shim.
+- **Freestanding (added with the native freestanding build):** the shim references no libc symbol: no `malloc`/`free` (the default allocator is a Lean `ByteArray` payload, aligned by hand, released by `lean_dec_ref`), no `memcpy`/`memset` (two small loops marked `no_builtin`, so the compiler cannot turn them back into calls; `tests/abi_test.c` still substitutes its own `memcpy` for the fault-injection copy), no `pthread_once` (an atomic once-flag: a concurrent first caller waits for the first; the Lean runtime initialises once). It compiles under `-ffreestanding -nostdinc` (the scorecard's freestanding check) because under `__STDC_HOSTED__ == 0` it takes the few `lean.h` names it uses from `abi/lean_mini.h` (about 30 lines: the object header, the ByteArray layout and allocation, `lean_dec_ref`, the io-result test); hosted builds use `lean.h`. `tests/lean_layout.c` compiles `lean_mini.h` next to `lean.h` and compares layout, tag, limit, allocation and release (and has negative self-tests in `scripts/test_native.sh`). Risk: a Lean release that changes the object header breaks `lean_mini.h` silently in the freestanding build only; the layout test (run in Tier 1) is the guard, and the toolchain is pinned.
+- **Covers:** `file:abi/vbm_json.c`
+
+## The WASM build
+
+### T10. The freestanding runtime of the wasm32 module AND of the native library: runtime/rt.c (and runtime/include/)
+- **What:** about 330 lines of new trusted, unverified C, and a dozen tiny freestanding headers (`runtime/include/`: `stddef.h`, `stdint.h`, `stdatomic.h`, `string.h`, `pthread.h`, a `lean/config.h` without mimalloc, ...: the bundled clang ships none). `scripts/build_wasm.sh` compiles the *generated C* of the seven `LeanJson` modules and the unmodified `abi/vbm_json.c` (T09) with `clang --target=wasm32 -nostdlib` and links them with `rt.c`; no libc, no WASI, **zero imports** (the test refuses a module with one; the link has no `--allow-undefined`, so an unresolved function or Init constant is a link error). `rt.c` is what replaces libleanrt and libInit for the objects the verified parser builds. FINDING: the closure of the exports does need the Lean runtime, exactly these symbols: the allocator (`malloc`, `free`, `free_sized`), `memcpy/memmove/memset/memcmp/strlen`, `lean_alloc_object`, `lean_free_object`, `lean_dec_ref_cold` (the object deleter), `lean_mark_persistent`, `lean_obj_once_cold`, `lean_inc_heartbeat`, the panics, `lean_io_mark_end_initialization`, `lean_initialize_runtime_module`, `initialize_Init` (which also builds the one Init constant it reads, `l_ByteArray_empty`), the string and array primitives `lean_string_push`, `lean_string_to_utf8`, `lean_array_mk`, `lean_byte_array_mk`, `lean_byte_array_push`, `lean_byte_array_copy_slice`, `lean_copy_sarray(_nonlinear)`, and four Init functions rewritten by hand: `List.reverse`, `List.appendTR`, `List.lengthTR`, `Char.ofNat`. The Lean bignum paths (`lean_nat_big_*`, `lean_nat_overflow_mul`, `lean_uint*_of_big_nat`, `lean_big_usize_to_nat`) are **trap stubs**: a Nat above 2^31-1 would need them; the parser's Nats are input offsets, the shim refuses `len > 2^31-1` and the loader `> 2^30` bytes. Checked, not assumed: `Value.num` is a lexeme (`Number`: sign, `List Digit`, fraction, exponent; no Nat or Int value of a number is ever computed, so 20, 400 or 100000 digits, huge exponents and `-0` are lists and bytes, never a bignum); the only Nat arithmetic in the closure is offsets and counts bounded by the input length and the UTF-8 code points (<= 0x10FFFF). The shared set `bignum` (281 rows from the reference: digit runs of 19 to 100000, valid and invalid, in every number position, exponents up to 10^100000 and `1e4294967296`, `-0` forms, nested in an array and an object key) goes through the module and the native ABI with no trap and the same tapes; a trap on any row is reported as such, and a runtime mutant that traps on a large allocation fails that set. So a hand-written copy of a few Init functions is trusted C here, in contrast to the native build, which links the real libInit (T03). Exports for the host: `vbm_json_parse`, `vbm_json_free`, `vbm_json_wasm_alloc`, `vbm_json_wasm_dealloc`, `vbm_json_wasm_live` (a test hook), `memory`.
+- **Native (added with the freestanding native build):** the SAME `runtime/rt.c` (not a fork: two `#ifdef __wasm__` parts, memory and the host exports) links into the native library: `scripts/build_native.sh` compiles the generated C, the shim and `rt.c` with `-ffreestanding -nostdlib -nostdlibinc`, combines them with `ld.lld -r --gc-sections` and keeps only `vbm_json_parse`/`vbm_json_free` global (`objcopy`), so the runtime's own `malloc`, `memcpy`, ... are local and cannot clash with a libc in the embedding program. The native additions are trusted too: `memcpy`/`memmove`/`memset` (the compiler emits calls to these even from freestanding code; tested against byte references over sizes 0..300, alignments and overlaps in `tests/native_rt.c`), and ONE static arena of `VBM_RT_ARENA_BYTES` (default 256 MiB of zero-initialised bss: the OS commits pages as they are touched) in place of linear memory; object links in the deleter are 32-bit offsets into it. Arena exhaustion is `lean_internal_panic_out_of_memory`, i.e. a trap (a library that aborts on out-of-memory, as the wasm module traps); it is reachable only by an input of the order of the arena. Single-threaded heap: the library's native `vbm_json_parse` is not safe to call concurrently (the header already promises nothing). The bignum stubs trap as in wasm; natively a Nat above 2^63-1 would be needed, beyond any input the arena can hold.
+- **Enters:** `runtime/rt.c`, `runtime/include/`, `scripts/build_wasm.sh`, `scripts/build_native.sh`; every host that loads `vbm.wasm`, every program that links `libvbm_json.a`/`.so` (the Python and Rust bindings load the freestanding `.so`: no Lean prefix, no rpath).
+- **Assumes:** lean.h without `LEAN_MIMALLOC` (objects carry their size in the word before them; `lean_alloc_small_object` / `lean_free_small_object`) and the object model of T03 (the deleter handles ctor, array, scalar array, string and closure objects and traps on any other kind); single thread (the module is not shared); the ownership conventions of the replaced functions are those of Lean 4.35's (read from the generated C's call sites: `lengthTR` and `Char.ofNat` borrow, `reverse` and `appendTR` consume); no written contract.
+- **Test:** `scripts/test_wasm.sh` (`tests/wasm/wasm_test.mjs`, `tests/abi_dump.c`): every shared vector (43426 rows, the JSONTestSuite included) through the module, and the native ABI's answers (return code and a hash of the whole tape) must equal the module's on every row; 100000-deep input is the depth error without a trap; no live bytes and no memory growth after 20000 parses; negative self-tests (corrupted verdict, code, canonical form and native answer, a deliberate leak, a module with an import, an unresolved symbol, three runtime mutants).
+- **Owner:** the owner (`runtime/` is in the protected set); written by the agent of the WASM task.
+- **Plan:** verify, in part: the object deleter and the allocator are the pieces to harden (sanitizer-style checks, more mutants); the four hand-written Init functions are to be replaced by the compiled Init C (Lean's own code for them) once the build can take it. Until then the differential against the native tape is the check.
+- **Native test:** `scripts/test_native.sh`: `nm -u` empty and only `vbm_json_*` exported; the vector suite and the whole `tests/abi_test.c` against the freestanding library alone; its answers equal the hosted build's on every row; negative self-tests: a build linking `malloc` or calling `printf` fails the nm check, runtime mutants (Char.ofNat, ByteArray.push, free, memcpy, memset, memmove) each fail.
+- **Covers:** `file:runtime/rt.c`
+
+### T11. Node.js (the test runtime of the wasm module)
+- **What:** `node` runs `tests/wasm/wasm_test.mjs`, which instantiates the module with WebAssembly. A bug in it or in V8's WebAssembly could make the test pass wrongly; it is a test runner, not part of what ships. Tier 1 runs the wasm test only when `node` is on PATH (and says when it skips); Tier 2 requires it (`VBM_JSON_REQUIRE_NODE=1`).
+- **Enters:** `scripts/test_wasm.sh`; CI (the `ubuntu-latest` runner image provides it; `mise.toml` does not pin it).
+- **Assumes:** a WebAssembly implementation conforming to the spec (bulk-memory, which every current engine has); no written contract.
+- **Test:** the negative self-tests of `scripts/test_wasm.sh` show the runner can fail.
+- **Owner:** upstream OpenJS; the runner image.
+- **Plan:** accept, because it only runs the tests; the same module is meant to be loaded by browsers and edge runtimes, which are further engines (not tested here).
+- **Covers:** `tool:node`
+
+## The language bindings
+
+**Snapshot at the bindings (slice 1):** the ABI is described once, in `abi/vbm_json.abi.json`; `scripts/check_abi.py` checks it against `include/vbm_json.h` and `LeanJson/Tape.lean` (Tier 1) and `scripts/gen-bindings.sh` generates the Python and Rust bindings from it (Tier 1: committed = regenerated). Generated code is not listed as a file key: it is counted as boundary through the ABI description, in entry T12.
+
+### T12. The language bindings: generated tape readers, and the hand-written loaders (bindings/python/vbm_json/loader.py, bindings/rust/loader.rs)
+- **What:** (a) generated, about 200 lines each (`bindings/python/vbm_json/_generated.py`, `__init__.py`, `bindings/rust/src/{sys,lib}.rs`): constants, struct layouts and prototypes from the ABI description, and **a second decoder of the tape** in each language (it reads the little-endian words the library produced into Python objects / a Rust `enum Value`; it parses no JSON and decides nothing about validity, but a bug in it returns a wrong value from a right tape). The Python `parse` returns numbers as `Number` (the lexeme) and objects as `Object` (a pair list, duplicates kept); the Rust `parse` returns `Value::Number(String)` and `Value::Object(Vec<(String, Value)>)`. The generated Rust has `unsafe` FFI (the no-unsafe rule is for Lean). (b) hand-written, about 20 lines each: the loaders, which only say where `libvbm_json` is found (`VBM_JSON_LIB`, the package directory, the system path / `VBM_JSON_LIB_DIR` for the linker). `scripts/build_shared.sh` builds `libvbm_json.so` from the static Lean library and `abi/vbm_json.c` (T09), linked against the toolchain's `libInit_shared` and `libleanshared` with an rpath into the Lean prefix (the static `libleanrt` is not position-independent): a binding on a machine without that prefix does not load yet. The manifests (`bindings/python/pyproject.toml`, `bindings/rust/Cargo.toml`, `publish = false`) publish nothing.
+- **Enters:** `bindings/`, `scripts/gen_bindings.py`, `scripts/build_shared.sh`; every program that uses the Python or Rust binding.
+- **Assumes:** the ABI description is the header (`scripts/check_abi.py`); the host is little-endian and the library is the one built from this tree; ctypes and rustc honour the C layout of the three structs (`vbm_json_allocator`, `vbm_json_opts`, `vbm_json_tape`); no written contract beyond `include/vbm_json.h`.
+- **Test:** `scripts/test_bindings.sh`: every shared vector (43426 rows, the JSONTestSuite included; verdict, error code, and the value read back to the reference's canonical bytes) through each binding; 100000-deep input is the depth error; negative self-tests (a corrupted verdict, code and canonical form fail each binding; four mutants of each generated reader fail it; a drifted header, description or Tape.lean, and a tampered or missing generated file, fail their checks).
+- **Owner:** the owner (`abi/` and the gates are in the protected set); written by the agent of the bindings task.
+- **Plan:** verify, in part: the readers are tested against the reference on every vector, not proved; when the tape layout is specified in Lean (slice 2) the readers are to be checked against that specification. Not published; the packaging (a self-contained library, wheels, crates.io) is later.
+- **Covers:** `file:bindings/python/vbm_json/loader.py` `file:bindings/rust/loader.rs`
+
+### T13. cargo and rustc (the Rust binding's test toolchain)
+- **What:** `cargo` builds and runs `bindings/rust` (no dependencies, offline). A bug in them could make the Rust test pass wrongly; they are a test runner, not part of what ships. Tier 1 runs the Rust test only when `cargo` is on PATH (and says when it skips); Tier 2 requires it (`VBM_JSON_REQUIRE_CARGO=1`). `mise.toml` does not pin it; the `ubuntu-latest` runner image provides it.
+- **Enters:** `scripts/test_bindings.sh`; CI.
+- **Assumes:** a conforming Rust toolchain; no written contract.
+- **Test:** the negative self-tests of `scripts/test_bindings.sh` show the Rust runner can fail (corrupted rows, reader mutants).
+- **Owner:** upstream Rust project; the runner image.
+- **Plan:** accept, because it only runs the tests; pin it with mise if a version drift ever matters.
+- **Covers:** `tool:cargo`
+
+## Planned (not in the tree yet; promoted to a numbered entry, with a derived key, in the PR that adds the file)
+
+These are written down now so the trust base is known before the code exists. They are **not gated** until their file lands; the PR that adds the file must add the
+entry (the derivation in `scripts/trust-ledger-check.sh` then requires it).
+
+- **P1. (landed as T10, `runtime/rt.c`, with the WASM build.)** Was: `runtime/runtime.c`, the allocator shim (~200 lines of C). Freestanding (WASM: no imports, linked without `--allow-undefined`). A minimal bump arena is too small: JSON needs array and string growth, so expect a ~200-line allocator. New trusted C, unverified. Plan: sandbox then verify the smallest part; tested by mutants (each must fail the vectors) and the allocation ratchet. Will cover `file:runtime/runtime.c`.
+- **P2. The rest of the ABI (`abi/`).** Slice 1 landed `vbm_json_parse`, `vbm_json_free` and the tape (T09). Still to come: `vbm_json_validate`, `_print`, `_canonicalize` over caller-owned buffers with a "needed size" return, `abi.json` described in Lean, and the proved tape encode/decode (the packing is proved in Lean; the C edge that reads and writes the caller's memory stays trusted). Contract: `abi.json` and `docs/abi.md` (to write). Test: the shared vectors; mutants of the C edge.
+- **P3. Each binding's loader and tape reader (`bindings/{rust,ts,csharp,python}`). (Python and Rust landed as T12.)** Types and FFI declarations are generated from the ABI description and counted as boundary; the hand loader (at most 100 lines each) decides nothing but is a second decoder of the tape in another language. Tested by the vectors run in CI per language and by mutants of each tape reader; not proved. Will cover `file:bindings/<lang>/loader.<ext>`.
+- **P4. HACL\* (later).** F\*/KaRaMeL-generated C (Apache-2.0) for SHA-256, HMAC and later Ed25519, as a verified boundary and never reimplemented, if and when a library here needs a digest. Lean states the reference function and the extern contract; conformance by NIST CAVP and RFC 4231 vectors plus differential runs against the Lean reference.
+- **P5. The per-language toolchains (Node, rustc/cc, .NET, CPython) in CI.** The runners and package registries are outside our control; the CI workflow itself is T08.

@@ -1,0 +1,3 @@
+proved 5
+open 2
+total 18

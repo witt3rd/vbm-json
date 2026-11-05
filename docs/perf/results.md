@@ -1,0 +1,70 @@
+# Perf slices: measured results (before / after, per slice)
+
+Method: `docs/perf/bench.sh` (the profile's harness: the C ABI through `docs/perf/prof.c`, static library, `leanc -O2`; allocations of ONE parse via the linker's `--wrap`; MB/s = median of 5 windows of 0.6 s, best of 2 runs). **Every number is local, on the reference machine** (22 cores), run under `systemd-run --user --scope -p MemoryMax=8G`, `ulimit -c 0`; the machine is shared, so repeated runs of the same build differ by about 5%. None is CI. Corpora and their sha256: `docs/perf/profile.md` (the scorecard corpus is the adapter's `random.Random(5)` generator, 4000 records, regenerated here; hash matches). Order (maintainer, 2026-11-04): change 1 (string runs), then change 2 (cheaper tape pass); change 3 is `docs/perf/fuse-plan.md` only.
+
+## Slice 1: plain ASCII bytes in a string are pushed without a decoder call (`strLoop`)
+
+`strLoop` tests `plainAscii` (`0x20 ≤ x < 0x80`, not `"` (tested before), not `\`) and pushes `Char.ofNat x` at once; every other byte goes through `decodeCharA` as before. No heap object per ASCII character (the `Option (Nat × Nat)` of `decodeCharA` is gone from the hot path). 7 production lines (`LeanJson/Parse.lean`).
+Proofs: `decodeCharA_plain` (a plain ASCII byte is `decodeCharA`'s answer `(x, i+1)`), `strLoop_step` (one decoded character, shared by both branches), `strLoop_eq` and `strLoop_adv` re-proved with the extra case; `parseFast_eq_parse` and every public statement unchanged, no new axioms, ledger and closure baselines unchanged (specified share 100%).
+A 3-byte (CJK) fast path was also built and proved, and measured: twitter small allocations 122k to 90k but MB/s within the noise (137 to 140), string-heavy not better. Not landed (more code and proof for no measured gain).
+
+| corpus | bytes | MB/s before | MB/s after | small allocs before | small allocs after |
+|---|---|---|---|---|---|
+| twitter | 631515 | 98.7 | 137.3 | 393392 | 122109 |
+| canada | 2251051 | 40.9 | 42.5 | 2751536 | 2751446 |
+| citm_catalog | 1727204 | 140.5 | 164.5 | 534807 | 313778 |
+| small-objects | 2412355 | 37.6 | 42.5 | 2502358 | 2142358 |
+| string-heavy | 2915939 | 80.9 | 157.1 | 2695942 | 300004 |
+| scorecard corpus | 1033424 | 49.0 | 54.3 | 1069428 | 884538 |
+
+(large allocations, one per number or tape, unchanged: 111127 / 14393 / 120001 / 1 / 2110 / 36001.) What is left in strings: one `String.push` (a runtime call) per character, and the decoder tuple for non-ASCII characters and escapes.
+
+## Slice 2: the tape pass (`LeanJson/Tape.lean`)
+
+What changed (about 45 production lines): `pushWordFast` (one append of 8 zero bytes, then 8 in-place `set!` stores, instead of 8 `ByteArray.push` runtime calls per u64 word); `pushNumber` (the number lexeme is written straight into the text region: no `List` of bytes, no `map`, no `List.toArray`, no `ByteArray.mk`, so no per-number large allocation); `TapeBuf.num` (reads the buffers apart first so both stay unshared and the in-place path is kept). `pushWord` and `printNumber` stay as the DEFINITIONS of the layout.
+Proofs (`LeanJsonProofs/Tape.lean`, new, no new axioms): `pushWordFast_eq : pushWordFast b w = pushWord b w`, `pushDigits_eq`, `pushNumber_eq : pushNumber b n = b ++ ⟨(printNumber n).toArray⟩`, `TapeBuf.num_eq : s.num n = s.leaf kindNum ⟨(printNumber n).toArray⟩`. The layout theorem is still the later slice (ledger `tape-encode-decode` stays open); these are its lemmas. `xs.length` per container was left as it is (cheap next to the rest).
+
+Before = main after slice 1 (`70b9a78`) on the same run conditions; after = the slice 2 tree. Local, `docs/perf/bench.sh`.
+
+| corpus | bytes | MB/s before | MB/s after | small allocs before | small allocs after | large allocs before | large allocs after |
+|---|---|---|---|---|---|---|---|
+| twitter | 631515 | 131.7 | 144.1 | 122109 | 121642 | 2111 | 2 |
+| canada | 2251051 | 41.0 | 51.3 | 2751446 | 2584803 | 111128 | 2 |
+| citm_catalog | 1727204 | 157.4 | 189.4 | 313778 | 313778 | 14394 | 2 |
+| small-objects | 2412355 | 41.2 | 46.1 | 2142358 | 2142285 | 120002 | 2 |
+| string-heavy | 2915939 | 154.6 | 162.0 | 300004 | 300004 | 2 | 2 |
+| scorecard corpus | 1033424 | 52.5 | 63.7 | 884538 | 860500 | 36002 | 2 |
+
+(A "large" allocation is `lean_alloc_object`: before, one `ByteArray.mk` per number and per string text; after, only the tape and the text region. The 1-or-2 difference between the slice 1 table and this one is the shim's output buffers after the freestanding-ABI landing.) What is left: canada and small-objects are bound by the `Value` itself (digit lists, one object per node, the reversed element lists), which only the fused parse (`docs/perf/fuse-plan.md`) removes.
+
+## Slice 3 (preview, F4): the fused loop, measured before it is proved or exported
+
+`parseTapeFast` (`LeanJson/Tape.lean`) measured in a scratch copy whose `vbm_json_parse_tape` export points at it; the base is the same tree with the export on `parseTape` (main at F4), run back to back in the same session. **Local** (22 cores), `docs/perf/bench.sh` under `systemd-run --user --scope -p MemoryMax=8G`, `ulimit -c 0`, `ulimit -s 8192`, one run each (the machine is shared: about 5% noise). The same tree passes the differential (`vbm-json-vectors --check --corpus`) on all six corpora: the fused bytes are `parseTape`'s bytes. Nothing in the repository exports the fused path yet (that is F6, after `parseTapeFast_eq`).
+
+| corpus | bytes | MB/s base | MB/s fused | speedup | small allocs base | small allocs fused |
+|---|---|---|---|---|---|---|
+| twitter | 631515 | 142.7 | 209.8 | 1.47x | 121642 | 76421 |
+| canada | 2251051 | 54.0 | 183.2 | 3.39x | 2584803 | 167200 |
+| citm_catalog | 1727204 | 195.0 | 280.3 | 1.44x | 313778 | 81729 |
+| small-objects | 2412355 | 46.9 | 86.1 | 1.84x | 2142285 | 780002 |
+| string-heavy | 2915939 | 165.2 | 293.6 | 1.78x | 300004 | 180002 |
+| scorecard corpus | 1033424 | 63.7 | 138.3 | 2.17x | 860500 | 180002 |
+
+The estimate in `docs/perf/fuse-plan.md` (small-objects 110 to 130, canada 120 to 150, scorecard corpus 120 to 140) is met on canada (183) and the scorecard corpus (138) and missed on small-objects (86: 13 small allocations per record remain, the `Option (TapeBuf x Nat)` of each string and key node and the `FStack` cells).
+
+## Slice 3 (landed, F6): the export is the fused parser (`parseTapeFast_eq` proved)
+
+The measurement of the real export (main at `127abfa`), **local, on the reference machine**, `docs/perf/bench.sh` under `systemd-run --user --scope -p MemoryMax=12G -p MemorySwapMax=0`, `ulimit -c 0`, `ulimit -s 8192`, one run; the base column is the slice 2 table above (same corpora, same method, an earlier session; the machine is shared, about 5 to 10% noise: the preview in the section before measured 138.3 on the scorecard corpus, this run 120.9).
+
+| corpus | MB/s slice 2 | MB/s fused (export) | speedup | small allocs slice 2 | small allocs fused | large allocs |
+|---|---|---|---|---|---|---|
+| twitter | 144.1 | 201.8 | 1.40x | 121642 | 76421 | 2 |
+| canada | 51.3 | 158.9 | 3.10x | 2584803 | 167200 | 2 |
+| citm_catalog | 189.4 | 271.4 | 1.43x | 313778 | 81729 | 2 |
+| small-objects | 46.1 | 78.5 | 1.70x | 2142285 | 780002 | 2 |
+| string-heavy | 162.0 | 274.9 | 1.70x | 300004 | 180002 | 2 |
+| scorecard corpus | 63.7 | 120.9 | 1.90x | 860500 | 180002 | 2 |
+
+Against the estimate of `docs/perf/fuse-plan.md` (small-objects 110 to 130, canada 120 to 150, scorecard corpus 120 to 140): met on canada and the scorecard corpus, missed on small-objects (78 to 86; 13 small allocations per record remain: the `Option (TapeBuf x Nat)` of each string and key node, the `FStack` cells). The efficiency floor of about 85 MB/s on the scorecard corpus is cleared (120.9 here, 138.3 in the preview run). Left: the `tapeOk` copy of tape and text into the result (two memcpy), the per-byte `ByteArray.push` of plain string bytes (a `copySlice` of the plain run would replace it), the `Option` tuples of string nodes.
+
+Tier 2 kernel part, **local, on the reference machine**, capped, one run: `leanchecker --fresh LeanJson` 36.8 s, `LeanJsonProofs` 40.0 s, `leanexport` 12.5 s (364.6 MB), nanoda 27.0 s (61116 declarations, no typechecker errors): 116.3 s; the same four on `0c1e995`, before F0: 37.2 + 39.3 + 12.3 + 32.9 = 121.7 s (361.1 MB). The 1700 added proof lines did not lengthen the kernel re-check measurably.

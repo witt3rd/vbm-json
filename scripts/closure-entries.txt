@@ -1,0 +1,4 @@
+# The entry points of the closure gate: one Lean constant per line, the functions the C exports `vbm_json_*` call. `LeanJson.parseTapeFast` is the export `vbm_json_parse_tape`
+# (it returns the bytes of `parseTape`, `parseTapeFast_eq`); `LeanJson.parseFast` is the parser it follows, kept as an entry of its own (the proved claims are about it). The other exports are added with the ABI.
+LeanJson.parseFast
+LeanJson.parseTapeFast

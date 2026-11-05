@@ -1,0 +1,17 @@
+# The owner approves the specification, the ABI, the trusted C, the gates and their baselines, the workflows and the governance files:
+# everything in scripts/protected-paths.txt. (The repository has no branch protection yet; scripts/land-direct prints the protected-set result and the owner reads it.)
+/LeanJson/                        @witt3rd
+/LeanJson.lean                    @witt3rd
+/LeanJsonProofs/Ledger.lean       @witt3rd
+/abi/                             @witt3rd
+/runtime/                         @witt3rd
+/docs/decisions/                  @witt3rd
+/docs/trust-ledger.md             @witt3rd
+/lean-toolchain                   @witt3rd
+/mise.toml                        @witt3rd
+/lakefile.lean                    @witt3rd
+/AGENTS.md                        @witt3rd
+/CODEOWNERS                       @witt3rd
+/.github/workflows/               @witt3rd
+/.config/                         @witt3rd
+/scripts/                         @witt3rd
