@@ -30,4 +30,13 @@ done
 sed 's/^trap .reapj. EXIT; //' "$tmp/victim.sh" > "$tmp/noreap.sh"; rm -f "$tmp"/job.* "$tmp/ready"
 bash "$tmp/noreap.sh" "$root" "$tmp" fail || true
 sleep 0.3; g=$(cat "$tmp/job.grand"); if kill -0 "$g" 2>/dev/null; then kill "$g"; ran_case; else fail "self-test: without the reaper the job did not survive (the check cannot fail)"; fi
+. scripts/lib-reap.sh
+# reap_pids refuses what it does not own: a pid that is NOT the leader of its own group (what a recycled pid or a plain background job looks like) is left alone, and a dead or empty pid is no error
+sleep 100 & nl=$!   # started here without job control: it shares THIS script's group, it is not a group leader
+reap_pids "$nl" "" 999999999
+kill -0 "$nl" 2>/dev/null && ran_case || fail "reap_pids signalled a pid that is not its own group leader"
+kill "$nl"; wait "$nl" 2>/dev/null || true
+( set -m; sleep 100 & echo $! > "$tmp/lead" ; wait ) & lw=$!; for _ in $(seq 50); do [ -s "$tmp/lead" ] && break; sleep 0.1; done
+l=$(cat "$tmp/lead"); reap_pids "$l"; for _ in $(seq 50); do kill -0 "$l" 2>/dev/null || break; sleep 0.1; done
+! kill -0 "$l" 2>/dev/null && ran_case || fail "reap_pids did not stop a group leader"; wait "$lw" 2>/dev/null || true
 ran_done test_reap
