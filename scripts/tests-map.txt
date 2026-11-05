@@ -10,10 +10,10 @@ scripts/test_native.sh: scripts/lib-no-crash-record.sh LeanJson/ LeanJson.lean a
 scripts/test_bindings.sh: LeanJson/ LeanJson.lean abi/ include/ runtime/ bindings/ scripts/build_shared.sh scripts/check_abi.py scripts/gen_bindings.py scripts/gen-bindings.sh tests/bindings/
 scripts/test_lint_workflows.sh: .github/ scripts/lint-workflows.py
 scripts/test_protected_set.sh: scripts/protected-set.sh scripts/protected-paths.txt
-scripts/test_land_direct.sh: scripts/land-direct scripts/infra-re.sh
+scripts/test_land_direct.sh: scripts/land-direct scripts/land/ scripts/land.conf scripts/land.d/ scripts/infra-re.sh
 scripts/test_githook.sh: scripts/githooks/ scripts/wt
 scripts/test_run_parallel.sh: scripts/run-tests-parallel.sh
 scripts/test_select_tests.sh: scripts/select-tests.py
 scripts/test_no_crash_record.sh: scripts/lib-no-crash-record.sh
 scripts/test_gate_diff_improving.sh: scripts/gate-diff-improving.sh scripts/git-hermetic.sh scripts/land-direct
-scripts/test_relabel_attacks.sh: scripts/relabel-attacks.sh scripts/attacks/ scripts/gate-diff-improving.sh scripts/git-hermetic.sh scripts/land-direct scripts/protected-set.sh scripts/lint-workflows.py scripts/lib-no-crash-record.sh scripts/infra-re.sh scripts/githooks/
+scripts/test_relabel_attacks.sh: scripts/relabel-attacks.sh scripts/attacks/ scripts/gate-diff-improving.sh scripts/git-hermetic.sh scripts/land-direct scripts/protected-set.sh scripts/lint-workflows.py scripts/lib-no-crash-record.sh scripts/infra-re.sh scripts/land/ scripts/land.d/ scripts/land.conf scripts/githooks/

@@ -45,8 +45,8 @@ LISTS = ["scripts/closure-entries.txt", "scripts/ledger-bridges.txt", "scripts/p
          "scripts/protected-set.sh"]
 SOURCE = ["scripts/ClosureGate.lean", "scripts/LedgerGate.lean", "scripts/AxiomGate.lean", "scripts/land-direct", "scripts/regen-baselines.sh", "scripts/tier2.sh", "scripts/gate-diff-improving.sh",
           "scripts/trust-ledger-check.sh", "scripts/trust_ledger.py", "scripts/relabel-attacks.sh", "scripts/lint-pipefail.sh", "scripts/lint-proof-eval.sh", "scripts/select-tests.py",
-          "scripts/run-tests-parallel.sh", "scripts/infra-re.sh", "scripts/lib-no-crash-record.sh", "scripts/lint-workflows.py", "scripts/git-hermetic.sh", "scripts/wt"]
-SOURCE_DIRS = ["scripts/attacks/", "scripts/githooks/"]   # the attack files and the commit hook are gate source too
+          "scripts/run-tests-parallel.sh", "scripts/land.conf", "scripts/lib-no-crash-record.sh", "scripts/lint-workflows.py", "scripts/git-hermetic.sh", "scripts/wt"]
+SOURCE_DIRS = ["scripts/attacks/", "scripts/githooks/", "scripts/land/", "scripts/land.d/"]   # the attack files, the commit hook, the pinned lander and its hooks are gate source too
 out, bad = [], 0
 def say(ok, f, why):
     global bad; bad += (not ok); out.append(f"{'PASS' if ok else 'FAIL'} {f}: {why}")

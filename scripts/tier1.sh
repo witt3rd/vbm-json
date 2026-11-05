@@ -105,6 +105,8 @@ par scripts/test_lint_workflows.sh
 par scripts/test_protected_set.sh
 # 3b. scripts/land-direct: lands direct to main (no PR, no force); a worsening baseline, a code conflict, a failing Tier 1, a hold and a red main stop; a second lander waits (local bare remote, gh shim).
 par scripts/test_land_direct.sh
+# 3b'. The pinned lander is intact (scripts/land/PIN, MANIFEST.sha256; offline, well under a second): edit vbm-land, not the copy. The test above shows the check can fail; the lander also runs it.
+scripts/land/bin/land-check
 # 3c. The commit-on-main guard (scripts/githooks/pre-commit).
 par scripts/test_githook.sh
 # 3d. scripts/run-tests-parallel.sh: a failing, missing or silently skipped script fails the run.

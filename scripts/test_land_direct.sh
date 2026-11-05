@@ -1,153 +1,116 @@
 #!/usr/bin/env bash
-# Tier 1: scripts/land-direct (docs/decisions/0002-land-direct.md) can land and can stop. Against a local bare remote (denyNonFastForwards, and an update hook that records every ref update and can
-# refuse pushes), a gh shim for the red-check, a stand-in Tier 1 ("fails when BAD exists", with a per-call hook) and a stand-in regenerator:
-#  a commit lands on main as itself (no branch, no PR, linear, one JSON line); several land in order; two workers racing: one waits for the lock and lands after, a third that cannot get it exits 15 and lands
-#  nothing; a conflicting rebase aborts naming the file; a baseline conflict regenerates by itself, a worsening one stops; a failing Tier 1 lands nothing; main moving during Tier 1 re-runs; a refused push is
-#  retried (3 tries) and never forced; the hold marker stops it (also one set during Tier 1); a red main blocks all but a fix(ci): commit, except a red that is infrastructure (billing, runner, network: scripts/infra-re.sh), which does not; bad subject / >150 production lines stop; bad input is exit 2.
+# Tier 1: scripts/land-direct (docs/decisions/0002-land-direct.md) is a pinned copy of vbm-land plus this repository's scripts/land.conf and scripts/land.d/ hooks. The lander's own
+# behaviour (lock, lease, rebase, three tries, plain push, bounded steps, hold, freeze, red modes, regeneration, hooks, exit codes) is tested in vbm-land against every release; THIS test
+# is about what this repository adds and depends on, with the REAL stub, config and hooks in a scratch repository (a local bare remote, a gh shim, a mise shim, stand-in gates):
+#  the vendored copy is intact (scripts/land/bin/land-check) and a tampered copy, a stray file and an edited stub each FAIL the check and are refused by the lander (12); a commit lands as itself
+#  (no branch, no PR, linear, one JSON line with specified_share); a conflicting rebase aborts naming the file; a baseline conflict regenerates by itself and a worsening one stops (12); a failing
+#  Tier 1 lands nothing; the hold marker stops it; a red main blocks all but a fix(ci): commit, except a red that is infrastructure; a bad subject and a production diff over 150 lines without
+#  a Diff-Budget trailer stop; the gate-diff judge (main's copy: a change cannot replace it) refuses with 12; the relabel-attack suite runs exactly when a gate-defining file is touched and refuses with 12.
 #  Negative self-test: the no-force scan is shown to catch a force push in a fixture.
 export LC_ALL=C
 set -euo pipefail
 cd "$(dirname "$0")/.."
-land=$(pwd)/scripts/land-direct
+src=$(pwd)
 fail() { echo "tier1: land-direct: $*" >&2; exit 1; }
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT; export T
+# 0. the vendored copy is what its pin says; the check can fail (a tampered file, a stray file, an edited stub, an unpinned hook name); no force or delete push in anything that pushes
+scripts/land/bin/land-check >/dev/null || fail "the vendored copy of vbm-land differs from its pin (scripts/land/bin/land-check): edit vbm-land, not the copy"
+for tamper in "echo '# local patch' >> scripts/land/bin/land-red" "echo x > scripts/land/lib/stray.sh" "echo 'exit 0' > scripts/land-direct" "rm scripts/land/lib/infra-re.sh" "echo ':' > scripts/land.d/post-rebasee; chmod +x scripts/land.d/post-rebasee"; do
+  rm -rf "$T/v"; mkdir -p "$T/v/scripts"; cp -a scripts/land scripts/land-direct scripts/land.conf scripts/land.d "$T/v/scripts/"; cp -a .agents "$T/v/"; ( cd "$T/v" && bash -c "$tamper" )
+  if "$T/v/scripts/land/bin/land-check" --root "$T/v" >/dev/null 2>&1; then fail "negative self-test: land-check passes a tampered copy ($tamper)"; fi
+done
+[ ! -e scripts/infra-re.sh ] || fail "scripts/infra-re.sh exists: the one infrastructure classifier is the pinned scripts/land/lib/infra-re.sh (a second copy is how the landers drifted apart)"
 noforce() { grep -v '^[[:space:]]*#' "$1" | grep -E -- '--force|--mirror|--delete|push[^|;&]* -f |push[^|;&]* \+|push[^|;&]* :' || true; }
-[ -z "$(noforce "$land")" ] || fail "scripts/land-direct contains a force/delete push: $(noforce "$land")"
+[ -z "$(noforce scripts/land/bin/land-direct)" ] || fail "the vendored lander contains a force/delete push: $(noforce scripts/land/bin/land-direct)"
 printf 'git push --force-with-lease origin x\n' > "$T/forced.sh"; [ -n "$(noforce "$T/forced.sh")" ] || fail "negative self-test: the no-force scan missed a force push"
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
-git init -q --bare -b main "$T/remote.git"; git -C "$T/remote.git" config receive.denyNonFastForwards true
-cat > "$T/remote.git/hooks/update" <<'SH'
-#!/bin/sh
-echo "$1 $2 $3" >> "$T/updates"
-if [ "$1" = refs/heads/main ] && [ "$(cat "$T/reject" 2>/dev/null || echo 0)" -gt 0 ]; then echo $(( $(cat "$T/reject") - 1 )) > "$T/reject"; echo "main moved: refused by the test" >&2; exit 1; fi
+# shims: mise (runs what follows `--`), gh (answers from files in $T in the shape the red check asks for)
+mkdir -p "$T/bin"; printf '#!/bin/sh\n[ "$1" = exec ] && shift; [ "$1" = -- ] && shift; exec "$@"\n' > "$T/bin/mise"
+cat > "$T/bin/gh" <<'SH'
+#!/bin/bash
+US=$(printf '\037')
+case "$1 $2" in
+  "run list") [ -s "$T/latest" ] && cat "$T/latest";;
+  "run view") case " $* " in *" --log-failed "*) cat "$T/log" 2>/dev/null || true;; *) cat "$T/jobs" 2>/dev/null || true;; esac;;
+  "api repos/{owner}/{repo}/check-runs/77/annotations") cat "$T/annot" 2>/dev/null || true;;
+esac
+exit 0
 SH
-chmod +x "$T/remote.git/hooks/update"
+chmod +x "$T/bin/mise" "$T/bin/gh"; export PATH="$T/bin:$PATH" GH="$T/bin/gh"
+git init -q --bare -b main "$T/remote.git"; git -C "$T/remote.git" config receive.denyNonFastForwards true
+printf '#!/bin/sh\necho "$1 $2 $3" >> "$T/updates"\n' > "$T/remote.git/hooks/update"; chmod +x "$T/remote.git/hooks/update"
 git clone -q "$T/remote.git" "$T/work" 2>/dev/null; cd "$T/work"; git config core.hooksPath /dev/null
 git clone -q "$T/remote.git" "$T/other" 2>/dev/null; git -C "$T/other" config core.hooksPath /dev/null
-cat > "$T/regen.sh" <<'SH'
+# the scratch repository: this repository's REAL landing files, and stand-ins for the gates the hooks call
+mkdir -p scripts; cp -a "$src/scripts/land" "$src/scripts/land-direct" "$src/scripts/land.conf" "$src/scripts/land.d" scripts/; cp -a "$src/.agents" .
+sed -i 's/^LAND_STEP_TIMEOUT=.*/LAND_STEP_TIMEOUT=120/' scripts/land.conf
+cat > scripts/tier1.sh <<'SH'
+test ! -e BAD || { echo "BAD exists" >&2; exit 1; }
+echo "closure gate: spec 4 | boundary 0 | unverified 1 | total 5 | specified share 80.00% (floor 80.00%)"
+SH
+cat > scripts/regen-baselines.sh <<'SH'
 for m in m1 m2 m3; do cur=$(cat $m); old=$(awk -v k=$m '$1==k{print $2}' base.txt); [ "$cur" -le "$old" ] || exit 3; done
 for m in m1 m2 m3; do echo "$m $(cat $m)"; done > base.txt
 SH
-cat > "$T/tier1.sh" <<'SH'
-test ! -e BAD || { echo "BAD exists" >&2; exit 1; }
-n=$(cat $T/t1n 2>/dev/null || echo 0); n=$((n + 1)); echo $n > $T/t1n
-[ ! -e $T/hook.$n ] || sh $T/hook.$n
-echo "closure gate: spec 4 | boundary 0 | unverified 1 | total 5 | specified share 80.00% (floor 80.00%)"
+cat > scripts/gate-diff-improving.sh <<'SH'
+case $1 in --touched) cat "$T/touched" 2>/dev/null || true;; --suite-judged) echo "FAIL scripts/tier1.sh: stand-in"; exit "$(cat "$T/gdrc" 2>/dev/null || echo 0)";; esac
 SH
-cat > "$T/gh" <<'SH'
-#!/bin/bash
-case "$1 $2" in
-  "run list") cat $T/latest 2>/dev/null || true;;
-  "run view") case " $* " in *" --log-failed "*) cat $T/log 2>/dev/null || true;; *) cat $T/jobs 2>/dev/null || true;; esac;;
-  "api repos/{owner}/{repo}/check-runs/77/annotations") cat $T/annot 2>/dev/null || true;;
-esac
-SH
-chmod +x "$T/gh"
-# stand-ins for the gate-diff judge (its own self-test is test_gate_diff_improving.sh) and the relabel-attack suite (test_relabel_attacks.sh): the judge's verdict is $T/gdrc, the files it says are gate-defining are $T/touched
-cat > "$T/gdi.sh" <<'SH'
-case $1 in --touched) cat $T/touched 2>/dev/null || true;; --suite-judged) echo "FAIL scripts/tier1.sh: stand-in"; exit "$(cat $T/gdrc 2>/dev/null || echo 0)";; esac
-SH
-cat > "$T/relabel.sh" <<'SH'
-echo "$*" >> $T/relabel.calls; echo "stand-in attack output"; exit "$(cat $T/relabelrc 2>/dev/null || echo 0)"
-SH
-export GH="$T/gh" TIER1_CMD="sh $T/tier1.sh" REGEN_CMD="sh $T/regen.sh" LAND_LOCK_WAIT_SECONDS=60 GATE_DIFF_CMD="sh $T/gdi.sh" RELABEL_CMD="sh $T/relabel.sh"
+printf 'echo "$*" >> "$T/relabel.calls"; echo "stand-in attack output"; exit "$(cat "$T/relabelrc" 2>/dev/null || echo 0)"\n' > scripts/relabel-attacks.sh
+printf 'exit "$(cat "$T/prc" 2>/dev/null || echo 0)"\n' > scripts/protected-set.sh
+chmod +x scripts/*.sh
+printf '10\n' > m1; printf '10\n' > m2; printf '10\n' > m3; printf 'm1 10\nm2 10\nm3 10\n' > base.txt; printf 'line1\nline2\nline3\n' > code.txt
+printf '# generated\nbase.txt\n' > scripts/generated-paths.txt
 cm() { git add -A; git commit -qm "${2:-feat(test): $1}"; }
 cmo() { git -C "$T/other" add -A; git -C "$T/other" commit -qm "feat(test): $1"; }
-printf '10\n' > m1; printf '10\n' > m2; printf '10\n' > m3; printf 'm1 10\nm2 10\nm3 10\n' > base.txt; printf 'line1\nline2\nline3\n' > code.txt
-mkdir -p scripts; printf '# generated\nbase.txt\n' > scripts/generated-paths.txt
-cm base; git push -q origin HEAD:main; git -C "$T/other" pull -q origin main
-git worktree add -q -b w2 "$T/w2" main; git worktree add -q -b w3 "$T/w3" main   # more workers on the SAME git common dir
-common=$(git rev-parse --path-format=absolute --git-common-dir)
+cm base "chore(test): base"; git push -q origin HEAD:main; git -C "$T/other" pull -q origin main
+land=$(pwd)/scripts/land-direct
 sync() { git fetch -q origin; git checkout -q -B "$1" origin/main; }
 run() { "$land" "$@" >"$T/out" 2>&1 && rc=0 || rc=$?; }
 jf() { python3 -c 'import json,sys; print(json.loads(sys.stdin.read().splitlines()[-1])[sys.argv[1]])' "$1" < "$T/out"; }
-jfile() { python3 -c 'import json,sys; print(json.loads(open(sys.argv[2]).read().splitlines()[-1])[sys.argv[1]])' "$1" "$2"; }
 main() { git ls-remote origin refs/heads/main | cut -f1; }
 rgit() { git --git-dir="$T/remote.git" "$@"; }
-showf() { rgit show "main:$1"; }
-commit_in() { echo "$2" > "$1/$2.txt"; git -C "$1" add -A; git -C "$1" commit -qm "feat(test): $2"; }
-# 1. a commit lands as itself, direct to main
+# 1. the stub runs the pinned lander; a commit lands as itself, direct to main (no branch, no PR), linear, one JSON line carrying specified_share
+[ "$("$land" --version)" = "land-direct $(cat scripts/land/VERSION)" ] || fail "the stub does not run the vendored lander"
 sync a; echo a > a.txt; cm a; head0=$(git rev-parse HEAD); : > "$T/updates"
 run; [ "$rc" = 0 ] && [ "$(jf result)" = landed ] && [ "$(jf sha)" = "$(main)" ] && [ "$(jf commits)" = 1 ] && [ "$(jf specified_share)" = 80.0 ] && [[ "$(jf tier1_seconds)" =~ ^[0-9]+$ ]] || fail "a did not land: $(cat "$T/out")"
-[ "$(rgit log -1 --format=%s main)" = "feat(test): a" ] && grep -q "protected set" "$T/out" || fail "a: the commit did not land as itself"
+[ "$(rgit log -1 --format=%s main)" = "feat(test): a" ] && grep -q "protected set" "$T/out" || fail "a: the commit did not land as itself, or the protected-set line is missing"
 [ "$(wc -l < "$T/updates")" = 1 ] && [ "$(rgit for-each-ref --format='%(refname)')" = refs/heads/main ] || fail "a: the push touched more than main (no branch, no tag): $(cat "$T/updates")"
 [ "$(git rev-parse HEAD)" = "$head0" ] && [ -z "$(git status --porcelain)" ] || fail "a: the worker's own worktree was touched"
-# 1b. a dry run pushes nothing
 sync d1; echo d1 > d1.txt; cm d1; m0=$(main); run --dry-run; [ "$rc" = 0 ] && [ "$(jf result)" = would-land ] && [ "$(main)" = "$m0" ] || fail "dry run: $(cat "$T/out")"
-# 2. several local commits land in order, linear
-sync b; echo b1 > b1.txt; cm b1; echo b2 > b2.txt; cm b2; run; [ "$rc" = 0 ] && [ "$(jf commits)" = 2 ] || fail "b did not land: $(cat "$T/out")"
-[ "$(rgit log -2 --reverse --format=%s main | paste -sd,)" = "feat(test): b1,feat(test): b2" ] && [ -z "$(rgit rev-list --merges main)" ] || fail "b: not two linear commits in order"
-# 3. race: A holds the lock in its Tier 1; C (1 s patience) is told busy and lands nothing; B waits and lands after A
-sync r1; echo r1 > r1.txt; cm r1; git -C "$T/w2" checkout -q -B r2 origin/main; commit_in "$T/w2" r2; git -C "$T/w3" checkout -q -B r3 origin/main; commit_in "$T/w3" r3
-rm -f "$T/t1n"; printf 'touch $T/a.started\nwhile [ ! -e $T/a.go ]; do sleep 0.05; done\n' > "$T/hook.1"; m0=$(main)
-timeout 120 "$land" > "$T/outA" 2>&1 & pa=$!
-for _ in $(seq 400); do [ -e "$T/a.started" ] && break; sleep 0.05; done; [ -e "$T/a.started" ] || fail "race: A never reached its Tier 1"
-( cd "$T/w2" && LAND_LOCK_WAIT_SECONDS=1 timeout 60 "$land" ) > "$T/outC" 2>&1 && rcC=0 || rcC=$?
-[ "$rcC" = 15 ] && [ "$(jfile result "$T/outC")" = busy ] && [ "$(main)" = "$m0" ] || fail "race: a worker that cannot get the lock is not told busy (exit $rcC): $(cat "$T/outC")"
-( cd "$T/w3" && timeout 120 "$land" ) > "$T/outB" 2>&1 & pb=$!
-for _ in $(seq 400); do grep -q "waiting for the lock" "$T/outB" 2>/dev/null && break; sleep 0.05; done
-[ "$(main)" = "$m0" ] || fail "race: main moved while A still held the lock"
-touch "$T/a.go"; wait $pa && wait $pb || fail "race: A or B failed: $(cat "$T/outA" "$T/outB")"
-[ "$(rgit log -2 --reverse --format=%s main | paste -sd,)" = "feat(test): r1,feat(test): r3" ] && [ "$(cat "$T/t1n")" = 2 ] || fail "race: not A then B (tier1 x$(cat "$T/t1n")): $(rgit log --format=%s -4 main)"
-rm -f "$T/hook.1"
-# 4. a conflicting rebase aborts naming the file; main untouched; no rebase left in the lander's worktree
+sync b; echo b1 > b1.txt; cm b1; echo b2 > b2.txt; cm b2; run; [ "$rc" = 0 ] && [ "$(jf commits)" = 2 ] && [ -z "$(rgit rev-list --merges main)" ] || fail "b: two commits did not land linear: $(cat "$T/out")"
+# 2. a conflicting rebase aborts naming the file (11); main untouched
 sync cf; sed -i 2s/line2/mine/ code.txt; cm cf; git -C "$T/other" pull -q origin main; sed -i 2s/line2/theirs/ "$T/other/code.txt"; cmo mv; git -C "$T/other" push -q origin HEAD:main; m0=$(main)
-run; [ "$rc" = 11 ] && [ "$(jf result)" = conflict ] && grep -q "not generated: code.txt" "$T/out" && [ "$(main)" = "$m0" ] || fail "a code conflict was not stopped (exit $rc): $(cat "$T/out")"
-lw=$common/vbm-json-land-direct/wt
-[ -z "$(git -C "$lw" status --porcelain)" ] && [ ! -d "$(git -C "$lw" rev-parse --path-format=absolute --git-path rebase-merge)" ] || fail "the lander worktree is left dirty or in a rebase"
-# 5. a baseline both sides rewrote lands by itself; a worsening one stops (12)
+run; [ "$rc" = 11 ] && [ "$(jf result)" = conflict ] && grep -q "code.txt" "$T/out" && [ "$(main)" = "$m0" ] || fail "a code conflict was not stopped (exit $rc): $(cat "$T/out")"
+# 3. a baseline both sides rewrote lands by itself; a worsening one stops (12)
 sync g1; echo 8 > m1; printf 'm1 8\nm2 10\nm3 10\n' > base.txt; cm g1
 git -C "$T/other" pull -q origin main; echo 7 > "$T/other/m2"; printf 'm1 10\nm2 7\nm3 10\n' > "$T/other/base.txt"; cmo g2; git -C "$T/other" push -q origin HEAD:main
-run; [ "$rc" = 0 ] && grep -q "took main's and regenerating" "$T/out" && [ "$(showf base.txt)" = "$(printf 'm1 8\nm2 7\nm3 10')" ] || fail "g1: a baseline conflict did not resolve by itself (exit $rc): $(cat "$T/out")"
+run; [ "$rc" = 0 ] && grep -q "regenerating" "$T/out" && [ "$(rgit show main:base.txt)" = "$(printf 'm1 8\nm2 7\nm3 10')" ] || fail "g1: a baseline conflict did not resolve by itself (exit $rc): $(cat "$T/out")"
 git fetch -q origin; git checkout -q -B g3 "$(rgit log -1 --format=%H --grep='^feat(test): g2$' main)"; echo 9 > m2; printf 'm1 10\nm2 9\nm3 10\n' > base.txt; echo 12 > m3; cm g3; m0=$(main)
-run; [ "$rc" = 12 ] && [ "$(jf result)" = gate-diff ] && [ "$(main)" = "$m0" ] || fail "a worsening baseline was not stopped (exit $rc): $(cat "$T/out")"
-# 6. a failing Tier 1 lands nothing
-sync t; touch BAD; cm t; m0=$(main); run; [ "$rc" = 13 ] && [ "$(jf result)" = tier1 ] && grep -q "nothing lands" "$T/out" && [ "$(main)" = "$m0" ] || fail "a failing Tier 1 was not stopped (exit $rc): $(cat "$T/out")"
-# 7. main moves during Tier 1: re-rebased, Tier 1 runs again, then it lands on top of the newcomer
-sync mv1; echo mv1 > mv1.txt; cm mv1; rm -f "$T/t1n"; git -C "$T/other" pull -q origin main
-printf 'git -C %s/other pull -q origin main && echo late > %s/other/late.txt && git -C %s/other add -A && git -C %s/other commit -qm "feat(test): late" && git -C %s/other push -q origin HEAD:main\n' "$T" "$T" "$T" "$T" "$T" > "$T/hook.1"
-run; [ "$rc" = 0 ] && grep -q "moved during Tier 1" "$T/out" && [ "$(cat "$T/t1n")" = 2 ] && [ "$(showf late.txt)" = late ] && [ "$(showf mv1.txt)" = mv1 ] || fail "main moving during Tier 1 was not handled (exit $rc): $(cat "$T/out")"
-rm -f "$T/hook.1"; git -C "$T/other" pull -q origin main
-# 8. a refused push is retried, never forced; three refusals stop it with nothing landed
-sync p1; echo p1 > p1.txt; cm p1; echo 1 > "$T/reject"; run; [ "$rc" = 0 ] && grep -q "was refused" "$T/out" && [ "$(showf p1.txt)" = p1 ] || fail "a refused push was not retried (exit $rc): $(cat "$T/out")"
-sync p2; echo p2 > p2.txt; cm p2; m0=$(main); echo 3 > "$T/reject"; run; [ "$rc" = 1 ] && grep -q "refused three times" "$T/out" && [ "$(main)" = "$m0" ] || fail "three refused pushes did not stop it (exit $rc): $(cat "$T/out")"; echo 0 > "$T/reject"
-# 9. the hold marker: stops it at the start; one set during Tier 1 stops it right before the push; released, it lands
-sync h; echo h > h.txt; cm h; m0=$(main); "$land" --hold "owner says wait" >/dev/null
-run; [ "$rc" = 14 ] && [ "$(jf result)" = held ] && grep -q "owner says wait" "$T/out" && [ "$(main)" = "$m0" ] || fail "a hold marker did not stop it (exit $rc): $(cat "$T/out")"
-"$land" --release >/dev/null; rm -f "$T/t1n"; printf 'echo mid-flight > %s\n' "$common/vbm-json-land-hold" > "$T/hook.1"
-run; [ "$rc" = 14 ] && [ "$(main)" = "$m0" ] || fail "a hold set during Tier 1 did not stop the push (exit $rc): $(cat "$T/out")"
-"$land" --release >/dev/null; rm -f "$T/hook.1"; run; [ "$rc" = 0 ] && [ "$(showf h.txt)" = h ] || fail "after release the commit did not land: $(cat "$T/out")"
-# 10. main red (tier1 of its latest push failed) blocks a feature commit, lets a fix(ci): commit through
-printf '5\tabc123abc123\tfeat: broke it\n' > "$T/latest"; printf 'tier1\tfailure\ntier2\t\n' > "$T/jobs"
-sync rd; echo rd > rd.txt; cm rd; m0=$(main); run; [ "$rc" = 10 ] && [ "$(jf result)" = blocked-red ] && [ "$(main)" = "$m0" ] || fail "a red main did not block (exit $rc): $(cat "$T/out")"
-sync fx; echo fx > fx.txt; cm fx "fix(ci): repair main"; run; [ "$rc" = 0 ] && [ "$(showf fx.txt)" = fx ] || fail "a fix(ci): commit did not land on a red main (exit $rc): $(cat "$T/out")"
-printf 'tier1\tsuccess\n' > "$T/jobs"; sync ok; echo ok > ok.txt; cm ok; run; [ "$rc" = 0 ] || fail "a green main blocked: $(cat "$T/out")"
-# 10b. an INFRASTRUCTURE failure (scripts/infra-re.sh) does not freeze landing; a code failure, an empty or unreadable log, and a mismatching annotation still do
-printf 'tier1\tfailure\t77\ntier2\tskipped\t78\n' > "$T/jobs"; printf 'The job was not started because recent account payments have failed or your spending limit needs to be increased.\n' > "$T/annot"
-sync in1; echo in1 > in1.txt; cm in1; run; [ "$rc" = 0 ] && [ "$(showf in1.txt)" = in1 ] && grep -q "infrastructure reason" "$T/out" || fail "a billing annotation (job never started) froze landing (exit $rc): $(cat "$T/out")"
-printf 'unrelated annotation\n' > "$T/annot"; printf 'fatal: unable to access https://github.com/x/y: Could not resolve host: github.com\n' > "$T/log"
-sync in2; echo in2 > in2.txt; cm in2; run; [ "$rc" = 0 ] && [ "$(showf in2.txt)" = in2 ] || fail "an infra line in the failed log froze landing (exit $rc): $(cat "$T/out")"
-printf 'test_abi: assertion failed: the tape differs\n' > "$T/log"; rm -f "$T/annot"
-sync in3; echo in3 > in3.txt; cm in3; m0=$(main); run; [ "$rc" = 10 ] && [ "$(jf result)" = blocked-red ] && [ "$(main)" = "$m0" ] || fail "a code failure did not freeze landing (exit $rc): $(cat "$T/out")"
-rm -f "$T/log"; run; [ "$rc" = 10 ] && [ "$(main)" = "$m0" ] || fail "an empty log and no annotation did not freeze landing (exit $rc): $(cat "$T/out")"
-printf 'tier1\tfailure\ntier2\t\n' > "$T/jobs"; printf 'The job was not started because recent account payments have failed\n' > "$T/annot"; run; [ "$rc" = 10 ] && [ "$(main)" = "$m0" ] || fail "a job id that is unknown was trusted (exit $rc): $(cat "$T/out")"
-rm -f "$T/latest" "$T/jobs" "$T/log" "$T/annot"
-# 11. land-time checks: a bad subject stops; >150 production lines stop without a Diff-Budget trailer, land with one
-sync k1; echo o > o.txt; cm k1 "update stuff"; m0=$(main); run; [ "$rc" = 1 ] && grep -q "Conventional" "$T/out" && [ "$(main)" = "$m0" ] || fail "a bad subject did not stop: $(cat "$T/out")"
-sync k4; mkdir -p LeanJson; seq 1 160 > LeanJson/K4.lean; cm k4; run; [ "$rc" = 1 ] && grep -q "160 production lines" "$T/out" && [ "$(main)" = "$m0" ] || fail "160 production lines without a waiver did not stop: $(cat "$T/out")"
-sync k5; mkdir -p LeanJson; seq 1 160 > LeanJson/K5.lean; git add -A; git commit -qm "feat(test): k5" -m "Diff-Budget: split next"; run; [ "$rc" = 0 ] && grep -q "waived: split next" "$T/out" || fail "a waived budget did not land (exit $rc): $(cat "$T/out")"
-# 12. bad input: nothing to land (2), an unknown flag (2), a merge commit in the range (2)
-sync n; run; [ "$rc" = 2 ] && grep -q "nothing to land" "$T/out" || fail "an empty range was not refused (exit $rc): $(cat "$T/out")"
-run --nonsense; [ "$rc" = 2 ] || fail "an unknown flag was accepted"
-sync mg; echo mg > mg.txt; cm mg; git checkout -q -b side HEAD~1; echo s > s.txt; cm s; git checkout -q mg; git merge -q --no-ff side -m "feat(test): merge" 2>/dev/null; run; [ "$rc" = 2 ] && grep -q "merge commits" "$T/out" || fail "a merge commit was not refused (exit $rc): $(cat "$T/out")"
-# 13. the gate-defining set: a gate diff that is not improving stops (12) before Tier 1; a touched gate file runs the relabel-attack suite after Tier 1, a failing suite stops (12) and lands nothing, a passing one lands;
-# an untouched change does not pay for the suite
-sync gd1; echo gd1 > gd1.txt; cm gd1; m0=$(main); echo 1 > "$T/gdrc"; rm -f "$T/t1n"
-run; [ "$rc" = 12 ] && [ "$(jf result)" = gate-diff ] && grep -q "not purely improving" "$T/out" && [ "$(main)" = "$m0" ] && [ ! -e "$T/t1n" ] || fail "a worsening gate diff was not stopped before Tier 1 (exit $rc): $(cat "$T/out")"
-echo 0 > "$T/gdrc"; : > "$T/relabel.calls"; run; [ "$rc" = 0 ] && [ ! -s "$T/relabel.calls" ] && ! grep -q "relabel-attack suite" "$T/out" || fail "an untouched change ran the suite (exit $rc): $(cat "$T/out")"
-sync gd2; echo gd2 > gd2.txt; cm gd2; m0=$(main); echo scripts/tier1.sh > "$T/touched"; echo 1 > "$T/relabelrc"
-run; [ "$rc" = 12 ] && [ "$(jf result)" = gate-diff ] && grep -q "relabel-attack suite fails" "$T/out" && [ "$(main)" = "$m0" ] && grep -q -- "--tree ." "$T/relabel.calls" || fail "a failing attack suite did not stop the landing (exit $rc): $(cat "$T/out")"
-echo 0 > "$T/relabelrc"; run; [ "$rc" = 0 ] && grep -q "gate-defining files touched (scripts/tier1.sh)" "$T/out" && grep -q "relabel-attack suite: stand-in attack output" "$T/out" && [ "$(showf gd2.txt)" = gd2 ] || fail "a passing attack suite did not land (exit $rc): $(cat "$T/out")"
-rm -f "$T/touched" "$T/gdrc" "$T/relabelrc"
-[ -z "$(awk '$1 != "refs/heads/main"' "$T/updates")" ] || fail "a ref other than main was updated: $(cat "$T/updates")"
-echo "tier1: land-direct: lands direct to main (no branch, no PR, no force), one coordinator: race, conflict, baselines, tier1 failure, main moving, refused push, hold, red main, infra red, commit checks, a worsening gate diff, the relabel-attack suite: ok"
+run; [ "$rc" = 12 ] && [ "$(main)" = "$m0" ] || fail "a worsening baseline was not stopped (exit $rc): $(cat "$T/out")"
+# 4. a failing Tier 1 lands nothing (13)
+sync t; touch BAD; cm t; m0=$(main); run; [ "$rc" = 13 ] && [ "$(jf result)" = tier1 ] && [ "$(main)" = "$m0" ] || fail "a failing Tier 1 was not stopped (exit $rc)"
+# 5. the hold marker stops it (14)
+sync h; echo h > h.txt; cm h; m0=$(main); "$land" --hold "maintenance" >/dev/null; run; [ "$rc" = 14 ] && [ "$(jf result)" = held ] && [ "$(main)" = "$m0" ] || fail "the hold did not stop a landing (exit $rc)"
+"$land" --release >/dev/null; run; [ "$rc" = 0 ] || fail "released hold: $(cat "$T/out")"
+# 6. a red main blocks all but a fix(ci): commit, except a red that is infrastructure
+US=$(printf '\037'); printf '5%sdeadbeefdeadbeef%ssome title\n' "$US" "$US" > "$T/latest"; printf 'tier1%sfailure%s77\n' "$US" "$US" > "$T/jobs"; echo "tests failed: real" > "$T/log"; : > "$T/annot"
+sync r1; echo r1 > r1.txt; cm r1; m0=$(main); run; [ "$rc" = 10 ] && [ "$(jf result)" = blocked-red ] && [ "$(main)" = "$m0" ] || fail "a red main did not block (exit $rc): $(cat "$T/out")"
+sync r2; echo r2 > r2.txt; cm r2 "fix(ci): repair the build"; run; [ "$rc" = 0 ] && grep -q "is the fix" "$T/out" || fail "a fix(ci) commit did not land on a red main (exit $rc): $(cat "$T/out")"
+sync r3; echo r3 > r3.txt; cm r3; echo "The job was not started because recent account payments have failed" > "$T/annot"
+run; [ "$rc" = 0 ] && grep -q "infrastructure" "$T/out" || fail "an infrastructure failure counted as red (exit $rc): $(cat "$T/out")"
+rm -f "$T/latest" "$T/jobs" "$T/annot" "$T/log"
+# 7. land-time checks: a non-Conventional subject (1), over 150 production lines (under LeanJson/) without a Diff-Budget trailer (1), with one it lands
+sync s1; echo s > s.txt; cm s "not conventional"; m0=$(main); run; [ "$rc" = 1 ] && [ "$(main)" = "$m0" ] && grep -q "Conventional" "$T/out" || fail "a bad subject was not stopped (exit $rc)"
+sync p1; mkdir -p LeanJson; seq 1 200 > LeanJson/big.lean; cm p1; m0=$(main); run; [ "$rc" = 1 ] && [ "$(main)" = "$m0" ] && grep -q "150-line budget" "$T/out" || fail "a 200-line production diff was not stopped (exit $rc)"
+git commit -q --amend -m "feat(test): p1" -m "Diff-Budget: part 1 of 2"; run; [ "$rc" = 0 ] || fail "a Diff-Budget trailer did not waive the budget: $(cat "$T/out")"
+# 8. the judges: the gate-diff judge's refusal is exit 12; the judge is MAIN's copy (a change that replaces it with a stub is still refused); the relabel suite runs exactly when a gate-defining file is touched
+sync j1; echo j > j.txt; cm j; echo 1 > "$T/gdrc"; m0=$(main); run; [ "$rc" = 12 ] && [ "$(main)" = "$m0" ] && grep -q "not purely improving" "$T/out" || fail "a refusal of the gate-diff judge did not stop the landing with 12 (exit $rc): $(cat "$T/out")"
+printf 'exit 0\n' > scripts/gate-diff-improving.sh; cm j2; run; [ "$rc" = 12 ] && [ "$(main)" = "$m0" ] || fail "a change replaced the gate-diff judge and landed (exit $rc): the judge must be main's copy"
+echo 0 > "$T/gdrc"; : > "$T/relabel.calls"; sync j3; echo j3 > j3.txt; cm j3; run; [ "$rc" = 0 ] && [ ! -s "$T/relabel.calls" ] || fail "the relabel suite ran for a change that touches no gate-defining file (exit $rc)"
+echo "scripts/tier1.sh" > "$T/touched"; sync j4; echo j4 > j4.txt; cm j4; run; [ "$rc" = 0 ] && grep -q -- "--tree . --base origin/main" "$T/relabel.calls" || fail "the relabel suite did not run for a gate-defining change (exit $rc): $(cat "$T/out")"
+echo 1 > "$T/relabelrc"; sync j5; echo j5 > j5.txt; cm j5; m0=$(main); run; [ "$rc" = 12 ] && [ "$(main)" = "$m0" ] && grep -q "relabel-attack suite fails" "$T/out" || fail "a failing relabel suite did not stop the landing with 12 (exit $rc): $(cat "$T/out")"
+rm -f "$T/relabelrc" "$T/touched"
+# 9. the lander refuses a change that edits its own vendored copy, or adds a file to it (12)
+sync v1; echo '# local patch' >> scripts/land/bin/land-red; cm v1 "fix(land): patch the vendored copy"; m0=$(main); run; [ "$rc" = 12 ] && [ "$(main)" = "$m0" ] && grep -q "differs from its pin" "$T/out" || fail "an edit of the vendored copy was not stopped (exit $rc): $(cat "$T/out")"
+sync v2; echo '# stray' > scripts/land/lib/stray.sh; cm v2 "chore(land): stray file"; run; [ "$rc" = 12 ] && [ "$(main)" = "$m0" ] || fail "a stray file in the vendored tree was not stopped (exit $rc)"
+echo "tier1: land-direct: the vendored lander is intact and each tamper fails the check; lands as itself; conflict, worsening baseline, failing Tier 1, hold, red main (and its infrastructure exception), bad subject and size budget stop; the gate-diff judge (main's copy) and the relabel suite (only for a gate-defining change) refuse with 12; an edit of the vendored copy is refused: ok"

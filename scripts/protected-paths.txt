@@ -40,7 +40,11 @@ scripts/protected-paths.txt
 scripts/protected-set.sh
 scripts/test_protected_set.sh
 scripts/land-direct
-scripts/infra-re.sh
+scripts/land.conf
+scripts/land.d/
+scripts/land/
+.agents/skills/
+?scripts/infra-re.sh
 scripts/gate-diff-improving.sh
 scripts/test_gate_diff_improving.sh
 scripts/relabel-attacks.sh

@@ -26,8 +26,9 @@ export -f one; export T suite
 order=(); for i in "${ids[@]}"; do case $i in 07*) order=("$i" "${order[@]}");; *) order+=("$i");; esac; done
 mk_tree "$T/ctl"; printf '#!/usr/bin/env bash\nexit 1\n' > "$T/ctl/scripts/gate-diff-improving.sh"; git -C "$T/ctl" commit -qam "a gate that always fails"
 mk_tree "$T/miss"; git -C "$T/miss" rm -q scripts/attacks/01a-closure-mass-raised.sh; git -C "$T/miss" commit -qm "an attack dropped"
-mk_tree "$T/unwired"; sed -i '/relabel/d' "$T/unwired/scripts/land-direct"; git -C "$T/unwired" commit -qam "land-direct without the suite"
-mk_tree "$T/nodiff"; sed -i '/gdi/d' "$T/nodiff/scripts/land-direct"; git -C "$T/nodiff" commit -qam "land-direct without the diff judge"
+mk_tree "$T/unwired"; sed -i '/relabel/d' "$T/unwired/scripts/land.d/post-tier1"; git -C "$T/unwired" commit -qam "the post-tier1 hook without the suite"
+mk_tree "$T/nodiff"; sed -i '/gate-diff-improving/d' "$T/nodiff/scripts/land.d/post-rebase"; git -C "$T/nodiff" commit -qam "the post-rebase hook without the diff judge"
+mk_tree "$T/nostub"; printf '#!/usr/bin/env bash\nexit 0\n' > "$T/nostub/scripts/land-direct"; git -C "$T/nostub" commit -qam "an entry script that does not run the pinned lander"
 jobs=$(nproc); [ "$jobs" -le 6 ] || jobs=6   # as many as there are CPUs, at most 6: each run copies the tree, and a 2-CPU sandbox with a memory cap must not hold six
 ( for m in real sab; do for i in "${order[@]}"; do echo "$m $i"; done; done ) | xargs -P "$jobs" -L 1 bash -c 'one "$0" "$1"'
 rc_ctl=0; "$suite" --tree "$T/ctl" --only 01a-closure-mass-raised >"$T/ctl.out" 2>&1 || rc_ctl=$?
@@ -38,7 +39,8 @@ for id in "${ids[@]}"; do
 done
 [ "$rc_ctl" = 1 ] && grep -q '^BROKEN  01a-closure-mass-raised: the gate fails on the unattacked tree' "$T/ctl.out" || { cat "$T/ctl.out" >&2; fail "a gate that fails on the unattacked tree counted as refusing an attack (a vacuous refusal)"; }
 [ "$rc_miss" = 1 ] && grep -q '^MISSING' "$T/miss.out" || { cat "$T/miss.out" >&2; fail "an attack dropped from the tree did not fail the suite"; }
-"$suite" --check-wired || fail "scripts/land-direct does not call the relabel-attack suite and the diff judge"
-if "$suite" --check-wired --tree "$T/unwired" 2>/dev/null; then fail "--check-wired passes a scripts/land-direct that no longer calls the suite"; fi
-if "$suite" --check-wired --tree "$T/nodiff" 2>/dev/null; then fail "--check-wired passes a scripts/land-direct that no longer calls the diff judge"; fi
-echo "relabel-attacks: ${#ids[@]} attacks: each is refused by the tree's own gates and, with its gate stubbed, passes them and fails the suite; a broken gate, a vacuous control, a dropped attack and an unwired lander all FAIL: ok"
+"$suite" --check-wired || fail "the lander's hooks do not call the relabel-attack suite and the diff judge"
+if "$suite" --check-wired --tree "$T/unwired" 2>/dev/null; then fail "--check-wired passes a post-tier1 hook that no longer calls the suite"; fi
+if "$suite" --check-wired --tree "$T/nodiff" 2>/dev/null; then fail "--check-wired passes a post-rebase hook that no longer calls the diff judge"; fi
+if "$suite" --check-wired --tree "$T/nostub" 2>/dev/null; then fail "--check-wired passes a scripts/land-direct that does not run the pinned lander"; fi
+echo "relabel-attacks: ${#ids[@]} attacks: each is refused by the tree's own gates and, with its gate stubbed, passes them and fails the suite; a broken gate, a vacuous control, a dropped attack and an unwired hook or stub all FAIL: ok"

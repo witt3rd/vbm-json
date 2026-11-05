@@ -11,7 +11,7 @@
 #   committed, then each gate command runs; the attack is REFUSED when one of them fails (and, when the attack names one, its output carries the expected words).
 # --sabotage: the suite's own negative self-test: before each attack, every file the attack names in ATK_GATE_FILES is replaced by a stub that always succeeds ("a gate that
 #   cannot fail"); the attack must then be NOT refused, i.e. the suite must FAIL. A suite that still passes with its gate broken is itself broken (scripts/test_relabel_attacks.sh).
-# --no-lean: skip the attacks that need `lake` (ATK_LEAN=1): for the cheap Tier 1 self-test.   --list: the attack ids.   --check-wired: the landers call this suite.
+# --no-lean: skip the attacks that need `lake` (ATK_LEAN=1): for the cheap Tier 1 self-test.   --list: the attack ids.   --check-wired: the lander's hooks call this suite and the diff judge.
 # Exit: 0 PASS (every attack refused) | 1 FAIL (an attack passed the gates, a control failed, or an attack of the suite is missing from the tree) | 2 cannot decide.
 # The LAST line is PASS/FAIL with the seconds it took. An attack file defines: ATK_DESC, ATK_GATES (commands, run in the scratch root with $ATK_BASE = the proposed commit),
 # ATK_GATE_FILES, optionally ATK_LEAN=1 and ATK_EXPECT (a regex the refusal must print), and a function atk_apply (cwd = scratch root). scripts/attacks/lib.sh: helpers.
@@ -27,11 +27,18 @@ while [ $# -gt 0 ]; do case $1 in
 ids() { for f in "$here"/attacks/[0-9]*.sh; do b=${f##*/}; echo "${b%.sh}"; done; }   # sorted glob (LC_ALL=C)
 if [ "$mode" = list ]; then ids; exit 0; fi
 tree=$(cd "$tree" && pwd)
-if [ "$mode" = wired ]; then   # the suite is only a judge if the landers call it and Tier 1 tests it: removing the call is an attack too
-  ok=1; for l in scripts/land-direct; do
-    [ -e "$tree/$l" ] || { echo "relabel-attacks: no $l in the tree" >&2; ok=0; continue; }
-    code=$(grep -v '^[[:space:]]*#' "$tree/$l" || true); grep -q 'relabel-attacks\.sh\|\$relabel' <<<"$code" || { echo "relabel-attacks: $l does not call scripts/relabel-attacks.sh" >&2; ok=0; }
-    grep -q 'gate-diff-improving\.sh\|\$gdi' <<<"$code" || { echo "relabel-attacks: $l does not call scripts/gate-diff-improving.sh" >&2; ok=0; }; done
+if [ "$mode" = wired ]; then   # the suite is only a judge if the lander's hooks call it and Tier 1 tests it: removing the call is an attack too
+  ok=1
+  for pair in "scripts/land.d/post-tier1:relabel-attacks\.sh" "scripts/land.d/post-rebase:gate-diff-improving\.sh"; do   # hook:what it must call
+    l=${pair%%:*}; re=${pair#*:}
+    [ -x "$tree/$l" ] || { echo "relabel-attacks: no executable $l in the tree" >&2; ok=0; continue; }
+    code=$(grep -v '^[[:space:]]*#' "$tree/$l" || true); grep -q "$re" <<<"$code" || { echo "relabel-attacks: $l does not call ${re//\\/}" >&2; ok=0; }
+  done
+  # and the stub must still run the pinned lander, whose hooks directory is the default
+  stubcode=$(grep -v '^[[:space:]]*#' "$tree/scripts/land-direct" 2>/dev/null || true)
+  { [ -x "$tree/scripts/land/bin/land-direct" ] && grep -q 'land/bin/land-direct' <<<"$stubcode"; } || { echo "relabel-attacks: scripts/land-direct does not run the pinned lander (scripts/land/bin/land-direct)" >&2; ok=0; }
+  entry=$(cat "$tree/scripts/land-direct" 2>/dev/null || true)   # the entry script declares the wiring (comments included): the declaration and the hooks must agree
+  { grep -q 'post-rebase runs the gate-diff judge' <<<"$entry" && grep -q 'post-tier1 runs the relabel-attack suite' <<<"$entry"; } || { echo "relabel-attacks: scripts/land-direct no longer declares the wiring contract (post-rebase runs the gate-diff judge; post-tier1 runs the relabel-attack suite)" >&2; ok=0; }
   [ -x "$tree/scripts/test_relabel_attacks.sh" ] || { echo "relabel-attacks: scripts/test_relabel_attacks.sh (the suite's negative self-test) is missing or not executable" >&2; ok=0; }
   [ "$ok" = 1 ]; exit; fi
 start=$SECONDS

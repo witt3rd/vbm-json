@@ -10,7 +10,7 @@ fail() { echo "tier1: protected-set: $*" >&2; exit 1; }
 required="LeanJson/x LeanJson.lean LeanJsonProofs/Ledger.lean abi/x runtime/x docs/trust-ledger.md docs/decisions/0001-vbm-json.md lean-toolchain mise.toml lakefile.lean AGENTS.md CODEOWNERS
 .github/workflows/core.yml .config/wt.toml scripts/githooks/pre-commit scripts/wt scripts/tier1.sh scripts/tier2.sh scripts/ClosureGate.lean scripts/LedgerGate.lean scripts/AxiomGate.lean
 scripts/trust-ledger-check.sh scripts/trust_ledger.py scripts/closure-baseline.txt scripts/closure-entries.txt scripts/ledger-baseline.txt scripts/ledger-bridges.txt scripts/lint-pipefail.sh scripts/lint-proof-eval.sh scripts/proof-eval-allow.txt
-scripts/protected-paths.txt scripts/protected-set.sh scripts/land-direct scripts/infra-re.sh scripts/regen-baselines.sh scripts/generated-paths.txt scripts/run-tests-parallel.sh scripts/test_protected_set.sh scripts/test_land_direct.sh"
+scripts/protected-paths.txt scripts/protected-set.sh scripts/land-direct scripts/land.conf scripts/land.d/post-rebase scripts/land/x scripts/regen-baselines.sh scripts/generated-paths.txt scripts/run-tests-parallel.sh scripts/test_protected_set.sh scripts/test_land_direct.sh"
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
 entries=(); while IFS= read -r l; do l=${l%%#*}; l=${l//[[:space:]]/}; [ -n "$l" ] && entries+=("$l"); done < "$list"   # entries keep a leading "?" (may not exist yet)
 clean_entries=(); for e in "${entries[@]}"; do clean_entries+=("${e#\?}"); done

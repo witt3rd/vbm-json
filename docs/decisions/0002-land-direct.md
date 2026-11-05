@@ -20,3 +20,13 @@ Exit codes: 0 landed, 1 stopped, 2 bad input, 10 main red, 11 rebase conflict (a
 After a landing the worker's branch still holds its pre-rebase commits: start the next task from a fresh worktree off `origin/main`. No GitHub-side review exists; the gates, the hold marker and the red-check are the
 whole review, and the protected set is reported (not blocked) at landing: the owner reads it on main. The pushing identity needs push rights to `main` (`docs/branch-protection.md`). Tier 2 stays on main after the push.
 Not ported from the originating gates: per-commit task trailers, the gate-diff and F3 checks, the metrics log, the batch cycle, the Tier 2 freeze.
+
+## Update: the lander is a pinned copy of vbm-land
+`scripts/land-direct` is now a three-line stub that runs `scripts/land/bin/land-direct`, a pinned, vendored copy of vbm-land (`scripts/land/PIN` names the release and the commit; `scripts/land/MANIFEST.sha256` the hash of every file).
+It is read-only by contract: `scripts/land/bin/land-check` (Tier 1, and the lander itself on every rebased tree) fails on any difference, a stray file included; to change the tool, change vbm-land and update the pin
+(`scripts/land/bin/land-update <tag>`, one `chore(land)` commit). What is this repository's own: `scripts/land.conf` (base, the CI workflow and job, Tier 1, the regeneration command and generated list, the size budget) and
+`scripts/land.d/` (the hooks: `prepare` copies the warm `.lake`; `post-rebase` runs the protected-set report and the gate-diff judge; `post-tier1` runs the relabel-attack suite when a gate-defining file is touched; `json-fields` adds
+`specified_share`). The judges are taken from `origin/main`, not from the proposed tree. The behaviour above is unchanged except: the lock, hold marker, freeze marker and scratch worktree live in `<git common dir>/vbm-land/`
+(the hold is still `scripts/land-direct --hold` / `--release`; a freeze with an owner and expiry is new: `--freeze`, `--thaw`), the commit-subject check also accepts git's own `Revert "..."`, the infrastructure classifier is the pinned
+`scripts/land/lib/infra-re.sh`, the run is appended to a metrics log (`<common>/vbm-land/metrics.jsonl`), and the old environment overrides (`TIER1_CMD`, `REGEN_CMD`, ...) are gone: policy comes from `scripts/land.conf` on main only.
+The old script is removed. `scripts/land.d/`, `scripts/land.conf` and `scripts/land/` are in the protected set and in the gate-defining set judged by the relabel-attack suite (`scripts/attacks/08d`, `08e`, `07k`, `07l`).
