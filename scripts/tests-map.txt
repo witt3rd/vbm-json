@@ -19,3 +19,4 @@ scripts/test_gate_diff_improving.sh: scripts/gate-diff-improving.sh scripts/git-
 scripts/test_relabel_attacks.sh: scripts/relabel-attacks.sh scripts/attacks/ scripts/gate-diff-improving.sh scripts/git-hermetic.sh scripts/land-direct scripts/protected-set.sh scripts/lint-workflows.py scripts/lib-no-crash-record.sh scripts/infra-re.sh scripts/land/ scripts/land.d/ scripts/land.conf scripts/githooks/
 scripts/test_ran_evidence.sh: scripts/lib-ran.sh scripts/ran-evidence.sh scripts/check-zero-warning.sh scripts/run-tests-parallel.sh
 scripts/test_run_scoped.sh: scripts/run-scoped.sh
+scripts/test_reap.sh: scripts/test_reap.sh

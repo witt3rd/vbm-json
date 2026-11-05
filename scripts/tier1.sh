@@ -138,6 +138,9 @@ par scripts/test_relabel_attacks.sh
 # 3i. scripts/run-scoped.sh: status passes through, the bound holds, an aborted run leaves no orphan (scope and fallback).
 par scripts/test_run_scoped.sh
 
+# 3j. The reaper (scripts/lib-reap.sh): an aborted script leaves none of its background jobs or their children (the construction of test_native.sh / test_wasm.sh).
+par scripts/test_reap.sh
+
 # 4. The declared test scripts, in parallel; a failing, missing or silently skipped one fails Tier 1. Every scripts/test_*.sh must be declared.
 for f in scripts/test_*.sh; do case " ${tests[*]} $TIER2_ONLY " in *" $f "*) ;; *) echo "tier1: $f is not declared with par" >&2; exit 1;; esac; done
 # Delta selection (docs/decisions/0004-tier1-speed.md): only the tests the delta since the merge base can affect run (scripts/tests-map.txt; an unmapped file, a gate-defining file, no base: all of them).

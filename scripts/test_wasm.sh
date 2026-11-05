@@ -30,7 +30,10 @@ leanc "${SYSFLAGS[@]}" -Wall -Wextra -Werror -I include -o "$tmp/abi_dump" tests
 cmp "$tmp/native.txt" "$tmp/w.$$.txt" || { echo "test_wasm: the wasm build and the native ABI disagree (first differences):" >&2; diff "$tmp/native.txt" "$tmp/w.$$.txt" > "$tmp/d.txt" || true; sed -n 1,5p "$tmp/d.txt" >&2; exit 1; }; [ -s "$tmp/native.txt" ] || { echo "test_wasm: the native dump of the vectors is empty (nothing ran)" >&2; exit 1; }; ran_case
 echo "test_wasm: wasm == native: $(wc -l < "$tmp/native.txt") rows, same return code and same tape (hash) on every row; module $(stat -c %s "$tmp/vbm.wasm") bytes"
 # The independent negative self-tests below run concurrently (bgj NAME CMD..., joined by joinj; each builds into its own files): Tier 1 speed, docs/decisions/0004-tier1-speed.md.
-jpids=(); bgj() { "$@" & jpids+=($!); }; joinj() { local p; for p in "${jpids[@]}"; do wait "$p" || exit 1; done; jpids=(); }
+# Reaper: each job is its own process group (set -m), and an abort or exit stops the groups of the pids held here (scripts/lib-reap.sh; never by pattern; test_reap.sh).
+. scripts/lib-reap.sh
+jpids=(); bgj() { set -m; "$@" & jpids+=($!); set +m; }; reapj() { reap_pids "${jpids[@]}"; }; joinj() { local p; for p in "${jpids[@]}"; do wait "$p" || exit 1; done; jpids=(); }
+trap 'reapj; rm -rf "$tmp"' EXIT; trap 'exit 143' INT TERM HUP   # replaces the EXIT trap above: the same cleanup, plus the reaper
 changed() { cmp -s "$1" "$2" && { echo "test_wasm: self-test: the corruption of $3 changed nothing" >&2; exit 1; } || true; }
 sed '0,/"verdict":"ok"/s//"verdict":"err"/' "$v" > "$tmp/c1.jsonl"; changed "$v" "$tmp/c1.jsonl" verdict
 bgj must_fail "a corrupted expected verdict" run "$tmp/vbm.wasm" "$tmp/c1.jsonl"
