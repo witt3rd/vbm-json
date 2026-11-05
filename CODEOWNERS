@@ -1,6 +1,8 @@
 # Code owners (for notification). Nothing waits for an owner: an agent may edit the specification, the code, the scripts, the docs and AGENTS.md and land them like any change; only the lander files and the signing keys are off limits.
 /LeanJson/                        @witt3rd
 /LeanJson.lean                    @witt3rd
+/LeanJsonSimd/                    @witt3rd
+/LeanJsonSimd.lean                @witt3rd
 /LeanJsonProofs/Ledger.lean       @witt3rd
 /abi/                             @witt3rd
 /runtime/                         @witt3rd
@@ -9,6 +11,7 @@
 /lean-toolchain                   @witt3rd
 /mise.toml                        @witt3rd
 /lakefile.lean                    @witt3rd
+/lake-manifest.json               @witt3rd
 /AGENTS.md                        @witt3rd
 /CODEOWNERS                       @witt3rd
 /.github/workflows/               @witt3rd
