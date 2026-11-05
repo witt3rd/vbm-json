@@ -1,0 +1,1 @@
+scripts/tier1.sh | af482303dd95273b1214fe40fc7db46809b032ba3872e4132402812791f140aa | bg() reaper: each concurrent gate is its own process group, stopped by its held pid on abort; differential test vs the plain bg; judge-approved with the helpers protected first | 2026-11-05
