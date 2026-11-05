@@ -22,7 +22,11 @@ tests=(); par() { tests+=("$@"); }
 # The gates after the build are independent of each other and of the tests: they run concurrently (`bg NAME CMD...`, output kept and shown on failure; `bgwait` below),
 # so Tier 1 wall time is the longest of them, not the sum (docs/decisions/0004-tier1-speed.md).
 bgdir=$(mktemp -d); bgnames=()
-bg() { local n=$1; shift; bgnames+=("$n"); ( "$@" ) > "$bgdir/$n.log" 2>&1 & echo $! > "$bgdir/$n.pid"; }
+# Each gate is its own process group (set -m around the start) so an abort can stop the whole tree by the pid held in $bgdir/NAME.pid (scripts/lib-reap.sh; never by pattern).
+# Exit codes, ordering and output are those of the plain `( "$@" ) > log 2>&1 &` it replaces: scripts/test_bg_reap.sh runs both on a table of cases and compares.
+. scripts/lib-reap.sh
+bg() { local n=$1; shift; bgnames+=("$n"); set -m; ( "$@" ) > "$bgdir/$n.log" 2>&1 & echo $! > "$bgdir/$n.pid"; set +m; }
+reapbg() { local f; for f in "$bgdir"/*.pid; do [ -f "$f" ] || continue; reap_pids "$(cat "$f")"; done; }
 bgwait() { local bad=0 n; for n in "${bgnames[@]}"; do if wait "$(cat "$bgdir/$n.pid")"; then cat "$bgdir/$n.log"; else echo "tier1: FAILED: $n" >&2; cat "$bgdir/$n.log" >&2; bad=1; fi; done; [ $bad = 0 ] || exit 1; }
 
 # Lean sources under the roots that exist: LeanJson (spec + code), LeanJsonProofs, abi (arrives with the ABI), and the two umbrella files.
@@ -33,7 +37,7 @@ forbidden() { grep -HnE '\b(sorry|admit|axiom|unsafe|implemented_by|csimp)\b' "$
 bad=$(forbidden $(lean_sources))
 if [ -n "$bad" ]; then echo "tier1: forbidden construct(s):" >&2; echo "$bad" >&2; exit 1; fi
 # the scan can fail: each forbidden word is flagged, and the tier1-allow marker (and only it) lets a comment mention one
-st=$(mktemp); trap 'rm -f "$st"; rm -rf "$bgdir"' EXIT
+st=$(mktemp); trap 'rc=$?; [ $rc = 0 ] || reapbg; rm -f "$st"; rm -rf "$bgdir"' EXIT; trap 'exit 143' INT TERM HUP   # a failing exit or a signal stops the gates still running (their pids, held in $bgdir)
 for w in sorry admit axiom unsafe implemented_by csimp; do
   echo "theorem t : True := by $w" > "$st"; [ -n "$(forbidden "$st")" ] || { echo "tier1: the forbidden-constructs scan does not flag '$w'" >&2; exit 1; }
 done
@@ -143,6 +147,9 @@ par scripts/test_run_scoped.sh
 
 # 3j. The reaper (scripts/lib-reap.sh): an aborted script leaves none of its background jobs or their children (the construction of test_native.sh / test_wasm.sh).
 par scripts/test_reap.sh
+
+# 3k. The concurrent-gate reaper (bg/reapbg above): identical to the plain version on exit codes, ordering and output; an aborted run leaves no gate or child of one.
+par scripts/test_bg_reap.sh
 
 # 4. The declared test scripts, in parallel; a failing, missing or silently skipped one fails Tier 1. Every scripts/test_*.sh must be declared.
 for f in scripts/test_*.sh; do case " ${tests[*]} $TIER2_ONLY " in *" $f "*) ;; *) echo "tier1: $f is not declared with par" >&2; exit 1;; esac; done
