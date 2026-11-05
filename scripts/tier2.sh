@@ -10,6 +10,11 @@ cd "$(dirname "$0")/.."
 LEAN_PREFIX=$(lean --print-prefix)
 
 TIER1_ALL=1 scripts/tier1.sh   # every test, not the delta
+# The axiom gate's differential test over EVERY real constant (Tier 1 samples every 40th: the oracle is the old quadratic per-constant audit, about 2 CPU minutes over all 2244).
+echo "tier2: axiom gate differential test, every constant"
+dout=$(AXIOM_DIFF_FULL=1 lake env lean --run scripts/AxiomGate.lean --selftest) || { echo "$dout"; exit 1; }
+echo "$dout"
+grep -Eq 'differential test ok \(the shared walk equals the per-constant audit: axiom sets of ([0-9]+) of \1 real constants and' <<<"$dout" || { echo "tier2: the axiom gate's full differential test did not run over every constant" >&2; exit 1; }
 # Each step below that is a test script or a suite must print its ran-evidence (docs/decisions/0005-ran-evidence.md): a step that ran nothing (a refused tool) fails here, whatever its exit status was.
 ev=scripts/ran-evidence.sh
 echo "tier2: the wasm32 module (node required)"

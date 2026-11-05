@@ -108,9 +108,10 @@ def measureClosure (env : Environment) (args : List String) : IO Measure := do
   let reach := walk env entries {}
   -- Which constants do the statements of LeanJsonProofs theorems mention? A spec definition that no theorem mentions is "spec" in name only.
   let mut mentioned : NameSet := {}
-  for (n, ci) in env.constants.map₁.toList do
-    if let some idx := env.getModuleIdxFor? n then
-      if (env.header.moduleNames[idx.toNat]!).getRoot == `LeanJsonProofs then
+  -- read from the data of the LeanJsonProofs modules themselves (not by filtering every imported constant, which a self-test environment with `Lean` loaded makes slow)
+  for h : i in [0:env.header.moduleNames.size] do
+    if (env.header.moduleNames[i]).getRoot == `LeanJsonProofs then
+      for ci in env.header.moduleData[i]!.constants do
         if let .thmInfo _ := ci then
           for u in ci.type.getUsedConstants do mentioned := mentioned.insert u
   let mut uncovered : Array Name := #[]
