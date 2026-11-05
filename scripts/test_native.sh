@@ -11,17 +11,13 @@
 # Run: mise exec -- scripts/test_native.sh
 set -euo pipefail
 cd "$(dirname "$0")/.."
+. scripts/lib-ran.sh   # ran_case / ran_done / must_fail: the self-tests count what they executed and a refused tool is a failure (docs/decisions/0005-ran-evidence.md)
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 . scripts/lib-no-crash-record.sh; nocrash_build   # probes and mutants that are meant to crash run under `quiet` (no core, no systemd-coredump record, no notification); ulimit -c does not stop the record
 sysinc_flags() { printf '%s\n' -isystem "$1"; [ ! -d "$1/$(uname -m)-linux-gnu" ] || printf '%s\n' -isystem "$1/$(uname -m)-linux-gnu"; }
 mapfile -t SYSFLAGS < <(sysinc_flags "${VBM_JSON_SYSINCLUDE:-/usr/include}")
 # Independent negative self-tests (the layout mutants and the runtime mutants) run concurrently: bgj CMD..., joinj (docs/decisions/0004-tier1-speed.md).
 jpids=(); bgj() { "$@" & jpids+=($!); }; joinj() { local p; for p in "${jpids[@]}"; do wait "$p" || exit 1; done; jpids=(); }
-must_fail() {  # must_fail NAME CMD...: the check has to be able to fail, and say why
-  local n=$1 e="$tmp/neg.$BASHPID.err"; shift
-  if "$@" >/dev/null 2>"$e"; then echo "test_native: self-test: $n did not fail (the check cannot fail)" >&2; exit 1; fi
-  [ -s "$e" ] || { echo "test_native: self-test: $n failed without saying why" >&2; exit 1; }
-}
 changed() { cmp -s "$1" "$2" && { echo "test_native: self-test: the corruption of $3 changed nothing" >&2; exit 1; } || true; }
 lake build vbm-json-vectors LeanJson:static >/dev/null
 lib=.lake/build/lib/libvbm_x2djson_LeanJson.a
@@ -37,21 +33,21 @@ echo "test_native: nm -u is empty for the object and the shared library; the onl
 # negative: the nm check can fail (a libc function the library needs)
 sed 's/^void \*malloc(size_t n)/void *vbm_not_malloc(size_t n)/' runtime/rt.c > "$tmp/nomalloc.c"; changed runtime/rt.c "$tmp/nomalloc.c" "the malloc rename"
 must_fail "a build that links malloc" env VBM_RT_C="$tmp/nomalloc.c" scripts/build_native.sh "$tmp/neg1" --no-so
-grep -q 'malloc' "$tmp/neg.$$.err" || { echo "test_native: self-test: the nm check did not name malloc" >&2; cat "$tmp/neg.$$.err" >&2; exit 1; }
+grep -q 'malloc' <<<"$MUST_FAIL_ERR" || { echo "test_native: self-test: the nm check did not name malloc" >&2; echo "$MUST_FAIL_ERR" >&2; exit 1; }
 printf 'int printf(const char *, ...);\nint vbm_x(void) { return printf("x"); }\n' > "$tmp/pf.c"
 must_fail "a file that calls printf" env VBM_EXTRA_C="$tmp/pf.c" VBM_KEEP=vbm_x scripts/build_native.sh "$tmp/neg2" --no-so
-grep -q 'printf' "$tmp/neg.$$.err" || { echo "test_native: self-test: the nm check did not name printf" >&2; exit 1; }
+grep -q 'printf' <<<"$MUST_FAIL_ERR" || { echo "test_native: self-test: the nm check did not name printf" >&2; exit 1; }
 # 2. the vectors against this library only
 lake exe vbm-json-vectors --n 4 --out "$tmp/v" >/dev/null
 v="$tmp/v/vectors.jsonl"
 leanc "${SYSFLAGS[@]}" -Wall -Wextra -Werror -I include -o "$tmp/abi_test" tests/abi_test.c "$tmp/lib/libvbm_json.a"
-"$tmp/abi_test" "$v" | sed 's/^/test_native: /'
+"$tmp/abi_test" "$v" | sed 's/^/test_native: /'; ran_case   # the positive run: the control of the negative self-tests
 sed '0,/"verdict":"ok"/s//"verdict":"err"/' "$v" > "$tmp/c1.jsonl"; changed "$v" "$tmp/c1.jsonl" verdict
 must_fail "a corrupted expected verdict" "$tmp/abi_test" "$tmp/c1.jsonl"
 leanc "${SYSFLAGS[@]}" -Wall -Wextra -Werror -I include -o "$tmp/dump_free" tests/abi_dump.c "$tmp/lib/libvbm_json.a"
 leanc "${SYSFLAGS[@]}" -Wall -Wextra -Werror -I include -o "$tmp/dump_host" tests/abi_dump.c abi/vbm_json.c "$lib"
 "$tmp/dump_free" "$v" > "$tmp/free.txt"; "$tmp/dump_host" "$v" > "$tmp/host.txt"
-cmp "$tmp/free.txt" "$tmp/host.txt" || { echo "test_native: the freestanding library and the hosted build disagree" >&2; exit 1; }
+cmp "$tmp/free.txt" "$tmp/host.txt" || { echo "test_native: the freestanding library and the hosted build disagree" >&2; exit 1; }; [ -s "$tmp/free.txt" ] || { echo "test_native: the dump of the vectors is empty (nothing ran)" >&2; exit 1; }; ran_case
 sed '2s/ [0-9] / 9 /' "$tmp/free.txt" > "$tmp/free2.txt"; changed "$tmp/free.txt" "$tmp/free2.txt" "a native answer"
 must_fail "a corrupted native answer" bash -c 'cmp "$1" "$2" >&2' _ "$tmp/free2.txt" "$tmp/host.txt"
 echo "test_native: freestanding == hosted: $(wc -l < "$tmp/free.txt") rows, same return code and same tape (hash) on every row"
@@ -76,7 +72,9 @@ mutant() {  # mutant NAME SED
   VBM_RT_C="$tmp/$1.c" scripts/build_native.sh "$tmp/m2_$1" --no-so >/dev/null
   leanc "${SYSFLAGS[@]}" -I include -o "$tmp/m2_$1/t" tests/abi_dump.c "$tmp/m2_$1/libvbm_json.a"
   quiet "$tmp/m2_$1/t" "$v" > "$f" 2>&1 || true
+  [ -s "$f" ] && ! grep -qE '(^|[^A-Za-z])heavy(-guard)?:' "$f" || { echo "test_native: self-test: runtime mutant $1 printed nothing, or was refused by a guard: it never ran" >&2; exit 1; }   # an empty or refused run differs from the host answers too
   if cmp -s "$f" "$tmp/host.txt"; then echo "test_native: self-test: runtime mutant $1 gave the right answers on every row (the vector check cannot fail)" >&2; exit 1; fi
+  ran_case
 }
 bgj mutant charofnat 's|? (uint32_t)v : 0;|? 0 : 0;|'
 bgj mutant bytepush 's|lean_sarray_cptr(r)\[sz\] = b;|lean_sarray_cptr(r)[sz] = b + 1;|'
@@ -89,4 +87,5 @@ bgj rtmutant memcpy_tail '0,/while (n--) \*dp++ = \*sp++;/s//while (n-- > 1) *dp
 bgj rtmutant memset_value 's|\*dp++ = (unsigned char)c;|*dp++ = (unsigned char)(c + 1);|'
 bgj rtmutant memmove_backward 's|else { dp += n; sp += n; while (n--) \*--dp = \*--sp; }|else { while (n--) *dp++ = *sp++; }|'
 joinj
+ran_done test_native
 echo "test_native: ok (negative self-tests: a build linking malloc and one calling printf fail the nm check; corrupted verdict, native answer, lean_mini.h tag and layout, and runtime mutants charofnat, bytepush, nofree, memcpy, memset, memmove each fail)"

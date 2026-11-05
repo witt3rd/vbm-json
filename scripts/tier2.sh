@@ -10,14 +10,16 @@ cd "$(dirname "$0")/.."
 LEAN_PREFIX=$(lean --print-prefix)
 
 TIER1_ALL=1 scripts/tier1.sh   # every test, not the delta
+# Each step below that is a test script or a suite must print its ran-evidence (docs/decisions/0005-ran-evidence.md): a step that ran nothing (a refused tool) fails here, whatever its exit status was.
+ev=scripts/ran-evidence.sh
 echo "tier2: the wasm32 module (node required)"
-VBM_JSON_REQUIRE_NODE=1 scripts/test_wasm.sh
+VBM_JSON_REQUIRE_NODE=1 $ev gate tier2-wasm '^ran: test_wasm: ([0-9]+) cases$' scripts/test_wasm.sh
 echo "tier2: the generated bindings, Python and Rust (cargo required)"
-VBM_JSON_REQUIRE_CARGO=1 scripts/test_bindings.sh
+VBM_JSON_REQUIRE_CARGO=1 $ev gate tier2-bindings '^ran: test_bindings: ([0-9]+) cases$' scripts/test_bindings.sh
 echo "tier2: the whole-shim mutation metric"
-scripts/test_mutants.sh
+$ev gate tier2-mutants '^ran: test_mutants: ([0-9]+) cases$' scripts/test_mutants.sh
 echo "tier2: the whole relabel-attack suite (the Lean attacks too; Tier 1 runs the others)"
-scripts/relabel-attacks.sh
+$ev gate tier2-relabel-attacks '^PASS relabel-attacks: ([0-9]+) of' scripts/relabel-attacks.sh
 echo "tier2: leanchecker --fresh LeanJson"
 lake env "$LEAN_PREFIX/bin/leanchecker" --fresh LeanJson
 echo "tier2: leanchecker --fresh LeanJsonProofs"

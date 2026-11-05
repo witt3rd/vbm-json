@@ -9,6 +9,7 @@
 # Run: mise exec -- scripts/test_wasm.sh
 set -euo pipefail
 cd "$(dirname "$0")/.."
+. scripts/lib-ran.sh   # ran_case / ran_done / must_fail: the self-tests count what they executed and a refused tool is a failure (docs/decisions/0005-ran-evidence.md)
 if ! command -v node >/dev/null 2>&1; then
   if [ -n "${VBM_JSON_REQUIRE_NODE:-}" ]; then echo "test_wasm: node is required here (Tier 2) and was not found" >&2; exit 1; fi
   echo "test_wasm: SKIPPED: node was not found on PATH (Tier 1 skips, Tier 2 requires it: scripts/tier2.sh)"; exit 0
@@ -22,19 +23,14 @@ scripts/build_wasm.sh "$tmp/vbm.wasm"
 lake exe vbm-json-vectors --n 4 --out "$tmp/v" >/dev/null
 v="$tmp/v/vectors.jsonl"
 run() { node tests/wasm/wasm_test.mjs "$1" "$2" "$tmp/w.$BASHPID.txt"; }   # each (concurrent) run has its own answer file; the main shell's is $tmp/w.$$.txt   # run WASM VECTORS
-run "$tmp/vbm.wasm" "$v"
+run "$tmp/vbm.wasm" "$v"; ran_case   # the positive run: the control of the negative self-tests
 leanc "${SYSFLAGS[@]}" -Wall -Wextra -Werror -I include -o "$tmp/abi_dump" tests/abi_dump.c abi/vbm_json.c "$lib" \
   || { echo "test_wasm: the native build needs the C library headers (see the preflight in scripts/test_abi.sh)" >&2; exit 1; }
 "$tmp/abi_dump" "$v" > "$tmp/native.txt"
-cmp "$tmp/native.txt" "$tmp/w.$$.txt" || { echo "test_wasm: the wasm build and the native ABI disagree (first differences):" >&2; diff "$tmp/native.txt" "$tmp/w.$$.txt" > "$tmp/d.txt" || true; sed -n 1,5p "$tmp/d.txt" >&2; exit 1; }
+cmp "$tmp/native.txt" "$tmp/w.$$.txt" || { echo "test_wasm: the wasm build and the native ABI disagree (first differences):" >&2; diff "$tmp/native.txt" "$tmp/w.$$.txt" > "$tmp/d.txt" || true; sed -n 1,5p "$tmp/d.txt" >&2; exit 1; }; [ -s "$tmp/native.txt" ] || { echo "test_wasm: the native dump of the vectors is empty (nothing ran)" >&2; exit 1; }; ran_case
 echo "test_wasm: wasm == native: $(wc -l < "$tmp/native.txt") rows, same return code and same tape (hash) on every row; module $(stat -c %s "$tmp/vbm.wasm") bytes"
 # The independent negative self-tests below run concurrently (bgj NAME CMD..., joined by joinj; each builds into its own files): Tier 1 speed, docs/decisions/0004-tier1-speed.md.
 jpids=(); bgj() { "$@" & jpids+=($!); }; joinj() { local p; for p in "${jpids[@]}"; do wait "$p" || exit 1; done; jpids=(); }
-must_fail() {  # must_fail NAME CMD...
-  local n=$1 e="$tmp/neg.$BASHPID.err"; shift
-  if "$@" >/dev/null 2>"$e"; then echo "test_wasm: self-test: $n did not fail (the check cannot fail)" >&2; exit 1; fi
-  [ -s "$e" ] || { echo "test_wasm: self-test: $n failed without saying why" >&2; exit 1; }
-}
 changed() { cmp -s "$1" "$2" && { echo "test_wasm: self-test: the corruption of $3 changed nothing" >&2; exit 1; } || true; }
 sed '0,/"verdict":"ok"/s//"verdict":"err"/' "$v" > "$tmp/c1.jsonl"; changed "$v" "$tmp/c1.jsonl" verdict
 bgj must_fail "a corrupted expected verdict" run "$tmp/vbm.wasm" "$tmp/c1.jsonl"
@@ -65,10 +61,11 @@ joinj
 grep -c '"set":"bignum"' "$v" > "$tmp/nbig.txt"; [ "$(cat "$tmp/nbig.txt")" -ge 200 ] || { echo "test_wasm: the vectors lack the bignum set" >&2; exit 1; }
 grep '"set":"bignum"' "$v" > "$tmp/big.jsonl"
 export VBM_MIN_ROWS=200
-run "$tmp/vbm.wasm" "$tmp/big.jsonl" >/dev/null
+run "$tmp/vbm.wasm" "$tmp/big.jsonl" >/dev/null; ran_case
 sed 's|  if (!c) return 0;|  if (!c) return 0;\n  if (c > 65536) TRAP();|' runtime/rt.c > "$tmp/trapbig.c"; changed runtime/rt.c "$tmp/trapbig.c" "mutant trapbig"
 VBM_RT_C="$tmp/trapbig.c" scripts/build_wasm.sh "$tmp/trapbig.wasm" >/dev/null
 must_fail "a runtime that traps on a long number" run "$tmp/trapbig.wasm" "$tmp/big.jsonl"
 run "$tmp/trapbig.wasm" "$tmp/big.jsonl" > "$tmp/trap.out" 2>&1 || true
-grep -q 'TRAPPED' "$tmp/trap.out" || { echo "test_wasm: self-test: the trap was not reported as a trap" >&2; exit 1; }
+grep -q 'TRAPPED' "$tmp/trap.out" || { echo "test_wasm: self-test: the trap was not reported as a trap" >&2; exit 1; }; ran_case
+ran_done test_wasm
 echo "test_wasm: ok (the negative self-tests: corrupted verdict, code, canonical form and native answer, a deliberate leak, a module with an import, an unresolved symbol, three runtime mutants, and a runtime that traps on a long number all fail)"

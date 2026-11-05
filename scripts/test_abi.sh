@@ -10,6 +10,8 @@
 # VBM_JSON_SYSINCLUDE overrides /usr/include (the self-test, and a local rehearsal of the runner's layout). Run: mise exec -- scripts/test_abi.sh
 set -euo pipefail
 cd "$(dirname "$0")/.."
+. scripts/lib-ran.sh   # ran_case / ran_done / must_fail: the self-tests count what they executed and a refused tool is a failure (docs/decisions/0005-ran-evidence.md)
+MUST_FAIL_PREFIX=quiet   # a crashing mutant runs under quiet
 . scripts/lib-no-crash-record.sh; nocrash_build   # a crashing mutant runs under `quiet` (no core, no systemd-coredump record); ulimit -c does not stop the record
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 sysinc_flags() { printf '%s\n' -isystem "$1"; [ ! -d "$1/$(uname -m)-linux-gnu" ] || printf '%s\n' -isystem "$1/$(uname -m)-linux-gnu"; }
@@ -24,7 +26,7 @@ preflight() {  # preflight SYSINC: the hosted headers the test needs must compil
 preflight "${VBM_JSON_SYSINCLUDE:-/usr/include}"
 mkdir "$tmp/emptyinc"   # negative self-test of the preflight: no headers at all must fail, and say which package
 if (preflight "$tmp/emptyinc") 2>"$tmp/pre.err"; then echo "test_abi: self-test: the preflight accepted a tree with no libc headers" >&2; exit 1; fi
-grep -q 'libc6-dev' "$tmp/pre.err" || { echo "test_abi: self-test: the preflight failure did not name the package" >&2; exit 1; }
+grep -q 'libc6-dev' "$tmp/pre.err" || { echo "test_abi: self-test: the preflight failure did not name the package" >&2; exit 1; }; ran_case
 mapfile -t SYSFLAGS < <(sysinc_flags "${VBM_JSON_SYSINCLUDE:-/usr/include}")
 lake build LeanJson:static vbm-json-vectors >/dev/null
 lib=.lake/build/lib/libvbm_x2djson_LeanJson.a; [ -f "$lib" ] || { echo "test_abi: $lib was not built" >&2; exit 1; }
@@ -32,12 +34,7 @@ lake exe vbm-json-vectors --n 4 --out "$tmp/v" >/dev/null
 v="$tmp/v/vectors.jsonl"
 build() { leanc "${SYSFLAGS[@]}" -Wall -Wextra -Werror -I include -o "$1" tests/abi_test.c "$2" "$lib"; }   # build OUT SHIM.c
 build "$tmp/abi_test" abi/vbm_json.c
-"$tmp/abi_test" "$v"
-must_fail() {  # must_fail NAME CMD...: the check has to be able to fail
-  local n=$1; shift
-  if quiet "$@" >/dev/null 2>"$tmp/neg.err"; then echo "test_abi: self-test: $n did not fail the test (the check cannot fail)" >&2; exit 1; fi
-  [ -s "$tmp/neg.err" ] || { echo "test_abi: self-test: $n failed without saying why" >&2; exit 1; }
-}
+"$tmp/abi_test" "$v"; ran_case   # the positive run (every row, depth, allocator, leak): the controls of the negative self-tests below
 changed() { cmp -s "$1" "$2" && { echo "test_abi: self-test: the corruption of $3 changed nothing" >&2; exit 1; } || true; }
 # a corrupted expected verdict (an accepted row says err), error code (a syntax row says depth) and canonical form (first digit of the first canonical changed)
 sed '0,/"verdict":"ok"/s//"verdict":"err"/' "$v" > "$tmp/c1.jsonl"; changed "$v" "$tmp/c1.jsonl" verdict
@@ -66,4 +63,5 @@ mutant ok_status_1 'status == 0 && nw <= (n - 24) / 8 && nt <= n && 24 + 8 * nw 
 mutant ok_status_2 'status == 0 && nw <= (n - 24) / 8 && nt <= n && 24 + 8 * nw + nt == n' '(status == 0 && nw <= (n - 24) / 8) || (nt <= n && 24 + 8 * nw + nt == n)'
 mutant ok_sizes 'status == 0 && nw <= (n - 24) / 8 && nt <= n && 24 + 8 * nw + nt == n' '(status == 0 && nw <= (n - 24) / 8 && nt <= n) || 24 + 8 * nw + nt == n'
 mutant block_size 'size_t total = n - 24;' 'size_t total = n + 24;'
+ran_done test_abi
 echo "test_abi: ok (the negative self-tests: corrupted verdict, code and canonical form, a deliberate leak and eleven shim mutants all fail; the whole-shim mutation run is test_mutants.sh, Tier 2)"

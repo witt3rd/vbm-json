@@ -9,19 +9,15 @@
 # Run: mise exec -- scripts/test_bindings.sh
 set -euo pipefail
 cd "$(dirname "$0")/.."
+. scripts/lib-ran.sh   # ran_case / ran_done / must_fail: the self-tests count what they executed and a refused tool is a failure (docs/decisions/0005-ran-evidence.md)
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
-must_fail() {  # must_fail NAME CMD...: the check has to be able to fail, and say why
-  local n=$1; shift
-  if "$@" >/dev/null 2>"$tmp/neg.err"; then echo "test_bindings: self-test: $n did not fail (the check cannot fail)" >&2; exit 1; fi
-  [ -s "$tmp/neg.err" ] || { echo "test_bindings: self-test: $n failed without saying why" >&2; exit 1; }
-}
 changed() { cmp -s "$1" "$2" && { echo "test_bindings: self-test: the corruption of $3 changed nothing" >&2; exit 1; } || true; }
 
 # 1. the description and the header
-python3 scripts/check_abi.py --selftest
+python3 scripts/check_abi.py --selftest; ran_case
 
 # 2. the drift check
-scripts/gen-bindings.sh --check
+scripts/gen-bindings.sh --check; ran_case
 gen=(bindings/python/vbm_json/_generated.py bindings/python/vbm_json/__init__.py bindings/rust/src/sys.rs bindings/rust/src/lib.rs)
 for f in "${gen[@]}"; do
   [ -f "$f" ] || { echo "test_bindings: $f is missing" >&2; exit 1; }
@@ -40,7 +36,7 @@ lake exe vbm-json-vectors --n 4 --out "$tmp/v" >/dev/null
 v="$tmp/v/vectors.jsonl"
 export VBM_JSON_LIB="$tmp/lib/libvbm_json.so"
 py() { python3 tests/bindings/test_python.py "$1" "${2:-bindings/python}"; }
-py "$v"
+py "$v"; ran_case   # the positive run: the control of the negative self-tests below
 # 4. negative self-tests, Python
 sed '0,/"verdict":"ok"/s//"verdict":"err"/' "$v" > "$tmp/c1.jsonl"; changed "$v" "$tmp/c1.jsonl" verdict
 sed '0,/"code":"syntax"/s//"code":"depth"/' "$v" > "$tmp/c2.jsonl"; changed "$v" "$tmp/c2.jsonl" code
@@ -60,11 +56,11 @@ echo "test_bindings: python: corrupted verdict, code, canonical form and four re
 # 5. Rust
 if ! command -v cargo >/dev/null 2>&1; then
   if [ -n "${VBM_JSON_REQUIRE_CARGO:-}" ]; then echo "test_bindings: cargo is required here (Tier 2) and was not found" >&2; exit 1; fi
-  echo "test_bindings: rust SKIPPED: cargo was not found on PATH (Tier 1 skips, Tier 2 requires it: scripts/tier2.sh)"; exit 0
+  echo "test_bindings: rust SKIPPED: cargo was not found on PATH (Tier 1 skips, Tier 2 requires it: scripts/tier2.sh)"; ran_done test_bindings; exit 0
 fi
 export CARGO_TARGET_DIR="$tmp/target" CARGO_BUILD_JOBS=2 VBM_JSON_LIB_DIR="$tmp/lib"
 rs() { VBM_JSON_VECTORS="$1" cargo test --quiet --offline --manifest-path "${2:-bindings/rust}/Cargo.toml" -- --nocapture; }
-rs "$v" 2>&1 | grep -E '^vectors: ' || { echo "test_bindings: the rust vectors test did not report" >&2; exit 1; }
+rs "$v" 2>&1 | grep -E '^vectors: ' || { echo "test_bindings: the rust vectors test did not report" >&2; exit 1; }; ran_case
 for i in 1 2 3; do must_fail "rust: corrupted row set $i" rs "$tmp/c$i.jsonl"; done
 rsmutant() {  # rsmutant NAME FILE SED
   rm -rf "$tmp/r_$1"; mkdir -p "$tmp/r_$1"; cp -r bindings/rust/. "$tmp/r_$1/"
@@ -76,4 +72,5 @@ rsmutant shift src/sys.rs 's/^pub const TAPE_LEN_SHIFT: u32 = 8;/pub const TAPE_
 rsmutant dupkeys src/lib.rs 's/members.push((k, v));/members.push((k, Value::Null));/'
 rsmutant errcode src/sys.rs 's/^pub const VBM_JSON_SYNTAX: c_int = 1;/pub const VBM_JSON_SYNTAX: c_int = 9;/'
 echo "test_bindings: rust: corrupted verdict, code, canonical form and four reader mutants each fail"
+ran_done test_bindings
 echo "test_bindings: ok"
