@@ -9,6 +9,7 @@
 #   Generated files (docs/proof-ledger.md): accepted only when the ledger baseline moved improving, or (counts unchanged) when its render source LeanJsonProofs/Ledger.lean changed
 #                      (the ledger is owner-gated by protected-set.sh).
 #   scripts/tests-map.txt (which tests a changed file selects): may only select more; `none:` gains only documentation.
+#                      EXCEPT a landing that consumes an exact-diff gate-edit approval for scripts/tier1.sh ($LAND_GATE_APPROVED_FILE, set by the lander; the hash is recomputed here): then its verdict is PASS.
 #   LISTS and GATE SOURCE: FAIL on ANY change (add, edit, delete): owner only.
 #   --suite-judged (what scripts/land runs): a LIST or GATE SOURCE change is not owner-only but judged by the RELABEL-ATTACK SUITE (scripts/relabel-attacks.sh, run by the lander on the
 #      proposed tree; the lists' moves by scripts/baseline-monotone.py) instead; here it PASSes except scripts/protected-paths.txt, which must still protect everything the base list did
@@ -129,7 +130,21 @@ def tier1(p):
             cont = re.compile(r"(\\|&&|\|\||\|)\s*$")
             if cont.search(prev) and not prev.lstrip().startswith("#"): why.append(f"joins onto the line above ({prev.strip()[-40:]!r}): +{added[0]}")
             if cont.search(added[-1]) or re.match(r"\s*(&&|\|\||\|)", added[0]): why.append(f"joins onto an existing line: +{added[-1] if cont.search(added[-1]) else added[0]}")
-    say(not why, p, "only added lines" if not why else "; ".join(why))
+    ap = approved_gate_edit(p) if why else None
+    if ap: say(True, p, f"its removed/changed lines are APPROVED: an exact-diff approval (sha256 {ap[:12]}), already on main, is consumed by this landing (the verdict of the rules above is the judge's to overrule: it read the diff)")
+    else: say(not why, p, "only added lines" if not why else "; ".join(why))
+
+# GATE-EDIT APPROVALS (scripts/land/docs/gate-edit-approvals.md): the lander (scripts/land/lib/approvals.sh) enforces the rules (read from main, landed alone, one-time, in the window) and hands the approvals this landing
+# consumes in $LAND_GATE_APPROVED_FILE (`FILE HASH` per line). This judge honours it for ONE file only (APPROVABLE), and only when the hash is also what THIS judge computes for the diff it is judging (the lander's own
+# canonical form, recomputed here): a list that names another file, another diff, or an empty or missing list approves nothing. Numeric baselines, lists and gate sources are never relaxed by an approval.
+APPROVABLE = ("scripts/tier1.sh",)
+def approved_gate_edit(p):
+    f = os.environ.get("LAND_GATE_APPROVED_FILE", "")
+    if p not in APPROVABLE or not f or not os.path.isfile(f): return None
+    lines = {l.strip() for l in open(f).read().splitlines()}
+    r = subprocess.run(["bash", "-c", '. "$1" && ga_hash . "$2" "$3" "$4"', "_", f"{HERE}/land/lib/approvals.sh", mb, head, p], capture_output=True, text=True)
+    h = r.stdout.strip()
+    return h if r.returncode == 0 and re.fullmatch(r"[0-9a-f]{64}", h) and f"{p} {h}" in lines else None
 
 def tests_map(p):
     """The delta-selection map (scripts/select-tests.py) may only select MORE: no token leaves an `all:` or a test line, no line disappears, and `none:` (the paths that select no test) gains only documentation."""

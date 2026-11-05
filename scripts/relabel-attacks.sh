@@ -16,6 +16,7 @@
 # The LAST line is PASS/FAIL with the seconds it took. An attack file defines: ATK_DESC, ATK_GATES (commands, run in the scratch root with $ATK_BASE = the proposed commit),
 # ATK_GATE_FILES, optionally ATK_LEAN=1 and ATK_EXPECT (a regex the refusal must print), and a function atk_apply (cwd = scratch root). scripts/attacks/lib.sh: helpers.
 export LC_ALL=C
+unset LAND_GATE_APPROVED_FILE   # the suite judges the proposed gates against attacks, never under the landing's own approvals (an attack that needs a list sets it in its gate command)
 
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)

@@ -23,6 +23,7 @@ scripts/githooks/
 scripts/wt
 # The gates and their baselines
 scripts/tier1.sh
+?scripts/gate-edit-approvals.txt
 scripts/tier2.sh
 scripts/ClosureGate.lean
 scripts/LedgerGate.lean

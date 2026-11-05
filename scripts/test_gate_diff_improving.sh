@@ -84,6 +84,35 @@ for shape in "$(printf 'a%.0s' $(seq 1 6000))!" "$(printf '$a%.0s' $(seq 1 3000)
   GDI_TIMEOUT=20 GDI_FLAGS=--suite-judged mut "long line ${shape:0:12}..." fail "not a plain step" tier1_add "$shape"
 done
 # the bound itself: a judge that never finishes is killed and reported (exit 2, a clear line), not waited for
+# GATE-EDIT APPROVALS: the lander hands over the approvals a landing consumes ($LAND_GATE_APPROVED_FILE, `FILE HASH`); the judge relaxes scripts/tier1.sh's removed/changed lines for the exact diff and nothing else
+. "$root/scripts/land/lib/approvals.sh"
+LIST=$T/approved.txt
+mut_ap() {   # mut_ap NAME want needle LISTSPEC FILE_FOR_HASH CMD...: LISTSPEC is a printf format with %s for the true hash of FILE_FOR_HASH's diff ("none": no list at all, "empty": an empty list)
+  local name=$1 want=$2 needle=$3 spec=$4 hf=$5; shift 5
+  "$@"; git add -A; git commit -qm "$name" --allow-empty
+  local h; h=$(ga_hash . "$base" HEAD "$hf" || true); : > "$LIST"
+  case $spec in none) unset LAND_GATE_APPROVED_FILE;; empty) export LAND_GATE_APPROVED_FILE=$LIST;; missing) export LAND_GATE_APPROVED_FILE=$T/nope;; *) printf "$spec\n" "$h" > "$LIST"; export LAND_GATE_APPROVED_FILE=$LIST;; esac
+  out=$("$gate" ${GDI_FLAGS:-} "$base" HEAD 2>&1) && rc=0 || rc=$?
+  unset LAND_GATE_APPROVED_FILE
+  if [ "$want" = pass ]; then [ "$rc" = 0 ] && grep -qx PASS <<<"$out" && ran_case || fail "$name: an approved change was refused ($out)"
+  else [ "$rc" = 1 ] && grep -qx FAIL <<<"$out" && ran_case || fail "$name: expected FAIL, got rc=$rc ($out)"; fi
+  if [ -n "$needle" ] && ! grep -qF -- "$needle" <<<"$out"; then fail "$name: '$needle' not in the output ($out)"; fi
+  git reset -q --hard "$base"
+}
+rm_t1='sed -i "/^scripts\/lint-pipefail.sh/d" scripts/tier1.sh'
+mut_ap "approved: tier1 line removed"       pass "APPROVED"          'scripts/tier1.sh %s' scripts/tier1.sh eval "$rm_t1"
+mut_ap "approved: tier1 line changed"       pass "APPROVED"          'scripts/tier1.sh %s' scripts/tier1.sh eval 'sed -i "s/^scripts\/lint-pipefail.sh/scripts\/lint-pipefail.sh x/" scripts/tier1.sh'
+mut_ap "approved: a bg() style rewrite"     pass "APPROVED"          'scripts/tier1.sh %s' scripts/tier1.sh eval 'sed -i "/^scripts\/lint-pipefail.sh/c trap \"exit 143\" TERM; set -m" scripts/tier1.sh'
+mut_ap "no list: tier1 removal"             fail "removed/changed"   none                  scripts/tier1.sh eval "$rm_t1"
+mut_ap "empty list"                         fail "removed/changed"   empty                 scripts/tier1.sh eval "$rm_t1"
+mut_ap "missing list file"                  fail "removed/changed"   missing               scripts/tier1.sh eval "$rm_t1"
+mut_ap "a hash of another diff"             fail "removed/changed"   'scripts/tier1.sh 0000000000000000000000000000000000000000000000000000000000000000' scripts/tier1.sh eval "$rm_t1"
+mut_ap "a hash prefix is no approval"       fail "removed/changed"   'scripts/tier1.sh %.12s' scripts/tier1.sh eval "$rm_t1"
+mut_ap "another file named in the list"     fail "removed/changed"   'scripts/tier1.sh2 %s'  scripts/tier1.sh eval "$rm_t1"
+mut_ap "a field more on the line"           fail "removed/changed"   'scripts/tier1.sh %s x' scripts/tier1.sh eval "$rm_t1"
+mut_ap "tests-map: approval does not relax"  fail "lost"             'scripts/tests-map.txt %s' scripts/tests-map.txt num 's# scripts/tier1.sh##' scripts/tests-map.txt
+mut_ap "baseline: approval does not relax"   fail "mass"             'scripts/closure-baseline.txt %s' scripts/closure-baseline.txt num 's/^mass ([0-9]+)/echo "mass $((\1+1))"/e' scripts/closure-baseline.txt
+mut_ap "list of gate source: not relaxed"    fail "owner"            'scripts/closure-entries.txt %s' scripts/closure-entries.txt eval 'echo x >> scripts/closure-entries.txt'
 mkdir -p "$T/slow"; printf '#!/bin/sh\nexec sleep 60\n' > "$T/slow/python3"; chmod +x "$T/slow/python3"
 git reset -q --hard "$base"; echo x >> docs/other.md; git add -A; git commit -qm slow
 t0=$SECONDS; out=$(PATH="$T/slow:$PATH" GDI_TIMEOUT=1 "$gate" "$base" HEAD 2>&1) && rc=0 || rc=$?
