@@ -9,7 +9,7 @@
 # The hash is the sha256 of the CANONICAL DIFF of FILE: what `land-direct --print-gate-diff-hash FILE` prints (ga_canon below: fixed flags, no config, `index` lines dropped).
 # The rules (each one has a negative self-test in tests/test_approvals.sh):
 #   - approvals are read from the BASE branch, never from the change: a landing cannot approve itself;
-#   - an approval lands ALONE: a commit that adds a record changes no other file, and so does the landing that holds it (the edit comes in a later landing);
+#   - an approval lands ALONE: a commit that adds a record changes no other file, adds exactly ONE line and removes none, and so does the landing that holds it (the edit comes in a later landing);
 #   - one-time: a landing whose diff of FILE hashes to a record on base must REMOVE that record in the same landing (the consumption); a record is never reusable;
 #   - a record removed without being consumed is refused (flagged), unless it is stale (the window closed: tidying up) or withdrawn by an `Approval-Withdrawn: FILE <hash prefix>` trailer in a landing that changes nothing else (announced to the judge);
 #   - stale (older than LAND_APPROVAL_DAYS) or future-dated records approve nothing; a malformed or self-referencing record added is refused.
@@ -48,14 +48,19 @@ ga_records() {
 
 # ga_early DIR COMMITS APPROVALS_PATH: the per-commit rule, before any rebase: a commit that adds an approval record changes no other file. Prints the refusal and returns 1.
 ga_early() {
-  local d=$1 commits=$2 p=$3 c others added
+  local d=$1 commits=$2 p=$3 c others added ns
   for c in $commits; do
     added=$(git -C "$d" diff -U0 --no-renames "$c^" "$c" -- "$p" 2>/dev/null | sed -n 's/^+\([^+].*\)$/\1/p' | grep -vE '^[[:space:]]*(#.*)?$' || true)
     [ -n "$added" ] || continue
     others=$(git -C "$d" diff-tree --no-commit-id --name-only -r --no-renames "$c" | grep -vxF -- "$p" || true)
-    echo "land-direct: APPROVAL COMMIT: announce to the judge before landing the edit (${c:0:12} adds a gate-edit approval to $p)"
+    echo "land-direct: APPROVAL COMMIT: announce to the judge before landing the edit, with the diff hash and the FULL edit diff (${c:0:12} adds a gate-edit approval to $p)"
     if [ -n "$others" ]; then
       echo "land-direct: commit ${c:0:12} adds a gate-edit approval to $p and changes other files ($(echo $others)): an approval lands ALONE, in its own commit and its own landing, and is announced to the judge BEFORE the edit it approves (docs/gate-edit-approvals.md)." >&2
+      return 1
+    fi
+    ns=$(git -C "$d" diff --numstat --no-renames "$c^" "$c" -- "$p" | cut -f1,2)
+    if [ "$ns" != "1"$'\t'"0" ]; then
+      echo "land-direct: commit ${c:0:12} changes $p by $(tr '\t' '/' <<<"$ns") lines added/removed: an approval commit adds exactly ONE line (one record) and removes none, and changes no other file." >&2
       return 1
     fi
   done
@@ -85,6 +90,8 @@ ga_judge() {
   # R1: added records: alone, in the window, not about the approvals file
   if [ -s "$ADD" ]; then
     echo "land-direct: $(wc -l < "$ADD") approval record(s) added to $ap; the edit each approves lands later, in its own landing, and removes the record"
+    ns=$(git -C "$wt" diff --numstat --no-renames "$base" HEAD -- "$ap" | cut -f1,2)
+    [ "$ns" = "1"$'\t'"0" ] || ga_refuse "this landing adds an approval to $ap but changes it by $(tr '\t' '/' <<<"$ns") lines added/removed: an approval landing adds exactly ONE line (one record), removes none, and carries one approval only."
     others=$(grep -vxF -- "$ap" <<<"$changed" || true)
     [ -z "$others" ] || ga_refuse "this landing adds a gate-edit approval to $ap and changes other files ($(echo $others)): an approval lands ALONE (the same landing as an edit it approves is a self-approval); the edit comes after the judge has read the approval."
     while IFS='|' read -r f h d line; do

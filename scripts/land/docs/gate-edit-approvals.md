@@ -25,8 +25,8 @@ hash binds the path, the hunks, the mode lines and the removed and added text; i
 
 1. **Read from the base branch.** The lander reads approvals from `origin/<base>`, never from the change: a landing cannot approve itself. `LAND_GATE_APPEND_ONLY` (shell patterns) names the files that may only gain lines; a
    landing whose net diff removes or changes a line of one (or deletes it, or changes its mode) is refused (exit 12) unless an approval for exactly that diff is on base.
-2. **An approval lands alone, first.** A commit that adds a record changes no other file, and neither does the landing that carries it. The edit lands in a LATER landing. The approval commit is announced to the
-   judge before the edit commit, always: `land-direct` prints `APPROVAL COMMIT: announce to the judge before landing the edit`.
+2. **An approval lands alone, first, and it is ONE line.** A commit that adds a record changes no other file, adds exactly ONE line (one record) and removes none; the landing that carries it is the same (one approval per landing, no tidying alongside). It passes Tier 1 like any change. The edit lands in a LATER landing. The approval commit is announced to the
+   judge before the edit commit, always, with the diff hash AND the FULL edit diff (`land-direct --print-gate-diff FILE`): the hash binds the exact diff the judge read: `land-direct` prints `APPROVAL COMMIT: announce to the judge before landing the edit`.
 3. **One-time.** A landing whose diff of FILE hashes to a record on base must REMOVE that record in the same landing (the consumption), or it is refused. Nothing else keeps a log: the record's disappearance in the landing
    is the log. Removing a record is how it is used up; a record can never approve a second edit. (Adding a record next to the edit is not allowed, see 2; removing one is the consumption.)
 4. **A stale approval approves nothing.** A record older than `LAND_APPROVAL_DAYS` (default 7) days, or dated more than a day ahead, is refused when used, and refused when added.
