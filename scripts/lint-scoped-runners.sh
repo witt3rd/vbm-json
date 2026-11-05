@@ -3,6 +3,7 @@
 # (parent pid 1) for hours; every long runner is run under a transient scope with a bound (scripts/run-scoped.sh), reaped on exit.
 # A line RUNS a runner when the name is at command position (line start, after ; & | ( $( -- python3 bash sh time); it is allowed when `run-scoped.sh` appears earlier on that line.
 # Comments and mentions inside strings are not runs. --selftest (Tier 1 runs it): a direct call, a mise/python3/bash-prefixed call and a pipeline call each FAIL; a scoped call passes.
+# LIMIT (stated, accepted): this is a guard against accidents, not against a determined subject. Evasion by indirection (a variable holding the runner, a bash -c string, a renamed copy) is not detected.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 runners=$(grep -vE '^[[:space:]]*(#|$)' scripts/long-runners.txt | paste -sd'|' | sed 's/\./\\./g')

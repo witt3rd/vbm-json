@@ -19,7 +19,7 @@ unit="vbm-$name-$$-$RANDOM"
 stop() { systemctl --user stop "$unit.scope" >/dev/null 2>&1 || true; }
 trap 'stop' EXIT
 trap 'stop; exit 143' INT TERM HUP
-# systemd-run expands $VAR and turns $$ into $ in its arguments: double every $ so the command arrives as written
+# systemd-run treats $ in its arguments as its own syntax ($VAR is expanded, $$ becomes $): every $ in an argument is written as $$ here so the command receives its arguments exactly as given
 args=(); for a in "$@"; do args+=("${a//\$/\$\$}"); done
 systemd-run --user --scope --quiet --collect --unit="$unit" -p RuntimeMaxSec="$max" -- "${args[@]}" &
 wait $!; rc=$?
