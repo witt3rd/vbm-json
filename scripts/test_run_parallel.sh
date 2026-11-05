@@ -3,6 +3,7 @@
 # script the runner silently skipped each fail the run and name the script; the failing script's log is printed; a clean run passes.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+unset TEST_JOBS   # a caller (a memory-capped runner) may cap the parallelism; this test is about running in parallel
 run=$(pwd)/scripts/run-tests-parallel.sh
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
 fail() { echo "tier1: run-tests-parallel: $*" >&2; exit 1; }
