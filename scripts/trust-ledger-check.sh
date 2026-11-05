@@ -16,7 +16,10 @@ req=$(mktemp); trap 'rm -f "$req"' EXIT
 files() { git ls-files --cached --others --exclude-standard "$@"; }   # a file not yet added is still required
 {
   # the C and loaders we execute, the CI that gates us, the build pins (files). Generated binding code is not listed: it is counted as boundary through the ABI description.
-  { files 'runtime/*.c' 'abi/*.c' 'bindings/*/loader.*' '.github/workflows/*' lean-toolchain mise.toml lakefile.lean; } | sed 's/^/file:/'
+  { files 'runtime/*.c' 'abi/*.c' 'bindings/*/loader.*' '.github/workflows/*' lean-toolchain mise.toml lakefile.lean lake-manifest.json; } | sed 's/^/file:/'
+  # the pinned dependencies (lake-manifest.json): every C header they carry (trusted code that runs in our artifacts) and every @[extern] symbol their Lean sources declare
+  for d in .lake/packages/*/; do [ -d "$d" ] || continue; n=$(basename "$d"); for h in "$d"include/*.h; do [ -f "$h" ] && echo "dep:$n/include/$(basename "$h")" || true; done
+    grep -rhE '^[[:space:]]*@\[extern' "$d" --include='*.lean' --exclude-dir=.lake --exclude-dir=tests 2>/dev/null | sed -E 's/.*@\[extern[^"]*"([^"]+)".*/extern:\1/; t; s/.*/extern:UNNAMED/' | sort -u || true; done
   # every FFI symbol declared in Lean (private externs are invisible to the closure walk, so read the source; an unnamed one needs a key too)
   grep -rhE '^[[:space:]]*@\[extern' LeanJson abi --include='*.lean' 2>/dev/null | sed -E 's/.*@\[extern[^"]*"([^"]+)".*/extern:\1/; t; s/.*/extern:UNNAMED/' | sort -u || true
   # what the Lean pin brings: the compiler (frontend, kernel, C emitter), the runtime (lean.h, libleanrt), the bundled clang and ld.lld

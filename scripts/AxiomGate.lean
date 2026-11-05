@@ -1,7 +1,10 @@
 import Lean
 import LeanJson
 import LeanJsonProofs
-/-! Axiom gate (Tier 1 here: the library is small, so it is cheap): every constant defined in a `LeanJson` or `LeanJsonProofs` module may depend only
+import LeanJsonSimd
+import VbmSimd
+import VbmSimdProofs
+/-! Axiom gate (Tier 1 here: the library is small, so it is cheap): every constant defined in a `LeanJson`, `LeanJsonProofs`, `LeanJsonSimd`, `VbmSimd` (the pinned dependency) or `VbmSimdProofs` module may depend only
 on the three standard axioms. Exits non-zero (and names the offenders) otherwise. `--selftest` also proves the gate can fail: a
 synthetic constant that declares a non-standard axiom is added to the environment, and the audit must reject it. -/
 open Lean
@@ -104,11 +107,11 @@ def plant : CoreM (Array Name × Array Name) := do
     tops := tops.push prev
   return (tops, #[`Quot, `Quot.mk, `Quot.lift, `Quot.ind, `Nat.add_comm, `Classical.em, `propext, `Classical.choice, `Quot.sound])
 
-def ours (r : Name) : Bool := r == `LeanJson || r == `LeanJsonProofs
+def ours (r : Name) : Bool := r == `LeanJson || r == `LeanJsonProofs || r == `LeanJsonSimd || r == `VbmSimd || r == `VbmSimdProofs
 
 def main (args : List String) : IO UInt32 := do
   initSearchPath (← findSysroot)
-  let env ← importModules #[{ module := `LeanJson }, { module := `LeanJsonProofs }] {}
+  let env ← importModules #[{ module := `LeanJson }, { module := `LeanJsonProofs }, { module := `LeanJsonSimd }, { module := `VbmSimd }, { module := `VbmSimdProofs }] {}
   -- the constants of our modules, read from those modules' own data (not by filtering every imported constant)
   let mut names : Array Name := #[]
   for h : i in [0:env.header.moduleNames.size] do

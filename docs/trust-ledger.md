@@ -171,6 +171,19 @@ Entry format: **What** it is; **Enters** where it enters; **Assumes** what we as
 - **Plan:** accept, because it only runs the tests; pin it with mise if a version drift ever matters.
 - **Covers:** `tool:cargo`
 
+## The pinned dependency (vbm-simd)
+
+**Snapshot at the structural stage (S0 to S7, not yet exported):** the verified bit-parallel kernels live in their own repository, [vbm-simd](https://github.com/witt3rd/vbm-simd), pinned to one commit in `lakefile.lean` and `lake-manifest.json`. Its Lean (`VbmSimd`, `Init` only) is checked by this repository's gates like our own (only the new root `LeanJsonSimd/` may import it, `scripts/test_simd_imports.sh`; `LeanJson/` keeps its Init-only rule; `LeanJsonProofs` imports its proofs `VbmSimdProofs`; the axiom gate audits both); its **one trusted C header** is entry T14. Nothing from it is reachable from an export yet (the structural stage is dead code until the switch slice), so the closure gate sees no change.
+
+### T14. The pinned dependency vbm-simd: the shim header (ld64, st64, st32, ctz) and the pin
+- **What:** `lake-manifest.json` pins vbm-simd to a commit; `.lake/packages/vbm-simd/include/vbm_simd.h` is about 60 lines of trusted `static inline` C, four functions that are the bodies of four `@[extern]` primitives (`vbm_simd_ld64`, `vbm_simd_st64`, `vbm_simd_st32`, `vbm_simd_ctz`) whose Lean bodies are their specification: an 8-byte load from a Lean `ByteArray` (zero past the end), 8- and 4-byte stores (in place when unshared, copied when shared, nothing written past the end) and a trailing-zero count. They are total (no out-of-range access) and decide nothing; `lakefile.lean` compiles the generated C of `LeanJsonSimd` with `-include` of this header. A wrong load, a store through a shared array or a miscount would be a bug no Lean proof sees.
+- **Enters:** `lakefile.lean` (the `require` and the `-include` argument), `lake-manifest.json`; the generated C of `LeanJsonSimd/Stage1.lean` (and later every module that calls the primitives); the four extern symbols.
+- **Assumes:** vbm-simd's specification of the shims (its specification document, clauses VS-5 and VS-6, and its trust-ledger entry for the same header), tested there by about 100000 comparisons against the Lean models and by six deliberate mutants of the header; the pinned commit is the commit that was reviewed (`scripts/test_dep_pin.sh`); a little-endian host with GCC or clang builtins (the header refuses others at compile time). The freestanding build will need `lean_copy_sarray` from `runtime/rt.c` (T10) when the switch slice links it; contract: `docs/perf/simd-plan.md`.
+- **Test:** `scripts/test_dep_pin.sh` (the pin in `lakefile.lean`, the manifest and the checkout agree and the header is unedited; five negative self-tests) and `scripts/test_simd_imports.sh` (only `LeanJsonSimd/` imports the dependency, and never its proofs); the shims' differential test and mutants run in vbm-simd's own Tier 1; the stage-1 vectors of this repository will run through the shims once the switch slice exports them.
+- **Owner:** the owner (`lakefile.lean` and `lake-manifest.json` are in the protected set); vbm-simd is the same owner's repository.
+- **Plan:** verify, in part: the Lean side is proved against its models; the header is the small, exhaustively-exercised part that stays trusted. The pin changes only through the protected path, one reviewed commit at a time.
+- **Covers:** `file:lake-manifest.json` `dep:vbm-simd/include/vbm_simd.h` `extern:vbm_simd_ld64` `extern:vbm_simd_st64` `extern:vbm_simd_st32` `extern:vbm_simd_ctz`
+
 ## Planned (not in the tree yet; promoted to a numbered entry, with a derived key, in the PR that adds the file)
 
 These are written down now so the trust base is known before the code exists. They are **not gated** until their file lands; the PR that adds the file must add the
