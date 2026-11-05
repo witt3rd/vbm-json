@@ -59,6 +59,10 @@ scripts/lint-pipefail.sh
 # has fixture self-tests (each banned pattern, just-under-the-bound, allowlist expiry), run here with `--selftest`.
 scripts/lint-proof-eval.sh --selftest
 
+# 1d. Every declared long runner (scripts/long-runners.txt) runs under scripts/run-scoped.sh (a transient systemd scope with a bound, reaped on exit: an aborted run cannot orphan);
+# the lint has fixture self-tests (a direct call fails, a scoped call passes), run here with `--selftest`; the helper's own test is scripts/test_run_scoped.sh (3i).
+scripts/lint-scoped-runners.sh --selftest
+
 # 2. Build both libraries; warningAsError is set in lakefile.lean, so any warning fails. The mechanism is checked: the option is set, and a file with a warning fails under it.
 grep -q 'warningAsError, true' lakefile.lean || { echo "tier1: lakefile.lean does not set warningAsError" >&2; exit 1; }
 printf 'def f (x : Nat) : Nat :=\n  let y := 1\n  2\n' > "$st"
@@ -129,6 +133,9 @@ par scripts/test_no_crash_record.sh
 par scripts/test_gate_diff_improving.sh
 # 3h. The relabel-attack suite (scripts/relabel-attacks.sh, scripts/attacks/): every demonstrated way to relabel a gate is refused by the tree's own gates, and the suite fails when its gates are stubbed.
 par scripts/test_relabel_attacks.sh
+
+# 3i. scripts/run-scoped.sh: status passes through, the bound holds, an aborted run leaves no orphan (scope and fallback).
+par scripts/test_run_scoped.sh
 
 # 4. The declared test scripts, in parallel; a failing, missing or silently skipped one fails Tier 1. Every scripts/test_*.sh must be declared.
 for f in scripts/test_*.sh; do case " ${tests[*]} $TIER2_ONLY " in *" $f "*) ;; *) echo "tier1: $f is not declared with par" >&2; exit 1;; esac; done
