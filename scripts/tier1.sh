@@ -130,6 +130,9 @@ par scripts/test_select_tests.sh
 # 3f. The crash-record check and the quiet probe runner (scripts/lib-no-crash-record.sh): a coredumpctl entry fails the run (shim), a quiet crash leaves none.
 par scripts/test_no_crash_record.sh
 
+# 3f'. The Lean build cache (scripts/build-cache.sh, a contributor convenience that no gate calls): its key, restore and refusals, offline.
+par scripts/test_build_cache.sh
+
 # 3g. The diff judge of the gate-defining files (scripts/gate-diff-improving.sh): a worsening baseline, a masked or removed tier1 line, a loosened list and a shrunken protected set each FAIL.
 par scripts/test_gate_diff_improving.sh
 # 3h. The relabel-attack suite (scripts/relabel-attacks.sh, scripts/attacks/): every demonstrated way to relabel a gate is refused by the tree's own gates, and the suite fails when its gates are stubbed.
