@@ -7,4 +7,5 @@ import LeanJson.Vectors
 import LeanJson.Parse
 import LeanJson.Differential
 import LeanJson.Tape
+import LeanJson.Struct
 /-! # vbm-json: the umbrella of the library (imports `Init` only: see `docs/decisions/0001-vbm-json.md`). -/
