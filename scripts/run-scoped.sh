@@ -6,6 +6,8 @@
 # Without a usable systemd user manager (hosted CI) it falls back to `timeout` in its own process group: the bound still holds.
 # scripts/lint-scoped-runners.sh (Tier 1) fails any script that runs a listed runner without going through here.
 set -uo pipefail
+# internal: the scoped side. The arguments travel in a NUL-delimited file, because systemd-run's treatment of $ in its own arguments differs between versions.
+if [ "${1:-}" = --exec-argfile ]; then mapfile -d '' -t cmd < "$2"; rm -f "$2"; exec "${cmd[@]}"; fi
 [ $# -ge 3 ] || { echo "usage: run-scoped.sh NAME MAXSEC CMD..." >&2; exit 2; }
 name=$1; max=$2; shift 2
 case $name in *[!A-Za-z0-9_-]*|'') echo "run-scoped: bad NAME: $name" >&2; exit 2;; esac
@@ -17,11 +19,10 @@ systemctl --user is-system-running >/dev/null 2>&1 || [ "$(systemctl --user is-s
 if [ $usable = 0 ]; then exec timeout --kill-after=10 "$max" "$@"; fi
 unit="vbm-$name-$$-$RANDOM"
 stop() { systemctl --user stop "$unit.scope" >/dev/null 2>&1 || true; }
-trap 'stop' EXIT
+trap 'stop; rm -f "${argf:-}"' EXIT
 trap 'stop; exit 143' INT TERM HUP
-# systemd-run treats $ in its arguments as its own syntax ($VAR is expanded, $$ becomes $): every $ in an argument is written as $$ here so the command receives its arguments exactly as given
-args=(); for a in "$@"; do args+=("${a//\$/\$\$}"); done
-systemd-run --user --scope --quiet --collect --unit="$unit" -p RuntimeMaxSec="$max" -- "${args[@]}" &
+argf=$(mktemp); printf '%s\0' "$@" > "$argf"
+systemd-run --user --scope --quiet --collect --unit="$unit" -p RuntimeMaxSec="$max" -- "$(readlink -f "$0")" --exec-argfile "$argf" &
 wait $!; rc=$?
 # a scope that hit RuntimeMaxSec is killed by SIGTERM: report it the way timeout does
 [ $rc -ne 143 ] || rc=124
