@@ -1,27 +1,36 @@
 ---
 name: update-vbm-land
 description: >-
-  Update the pinned, vendored copy of vbm-land in a repository (land-update), run the drift audit, and understand the manifest. Use when land-check reports drift or an advice about a newer release, or when asked to bump vbm-land.
+  Update the pinned, vendored copy of vbm-land in a repository (land-update), read the "behind" report of the scheduled check, verify a signed release, and understand the manifest. Use when land-check reports drift, when the weekly vbm-land-update workflow says the repository is behind, or when asked to bump vbm-land.
 ---
 
 # update-vbm-land
 
-A repository vendors a pinned copy: `scripts/land/` (tool), `scripts/land/PIN` (source, version, 40-hex commit, manifest hash), the `scripts/land-direct` entry script (yours after the first install), and the vbm-land skills in `.agents/skills/`. `MANIFEST.sha256` lists the hash of every file; all of them are drift-checked.
+A repository vendors a pinned copy: `scripts/land/` (tool, templates), `scripts/land/PIN` (source, version, 40-hex commit, manifest hash, signature status), the `scripts/land-direct` entry script (yours after the first install), the vbm-land skills in `.agents/skills/`, and the scheduled workflow `.github/workflows/vbm-land-update.yml` (yours). `MANIFEST.sha256` lists the hash of every vendored file; all of them are drift-checked. Updates are **pulled by the repository**: vbm-land knows nothing about what vendors it (docs/update-propagation.md in the source).
 
-## Check
+## Know where you stand
 
 ```
-scripts/land/bin/land-check              # offline: copy still equals its pin (exit 0 ok, 1 drift, 2 not installed)
-scripts/land/bin/land-check --upstream   # also asks the source about the pinned commit; says if a newer release exists (exit 3: source unreachable)
+scripts/land/bin/land-check              # offline: the copy still equals its pin (0 ok, 1 drift, 2 not installed)
+scripts/land/bin/land-check --upstream   # also asks the source about the pinned commit (3: source unreachable)
+scripts/land/bin/land-update --check     # read-only: "pinned vX, latest vY: behind N releases (patch|minor|major)" (0 current, 1 behind, 3 unreachable)
 ```
-From a vbm-land checkout, the rollout table across repositories: `bin/land-audit DIR...`.
+The weekly workflow runs the drift check and `land-update --auto`; "behind" shows as a warning and a summary line. It is a reminder, never a gate.
 
-## Update
+## Update (the repository's own act)
 
-1. Fresh worktree off `origin/main`.
-2. `timeout 120 scripts/land/bin/land-update vX.Y.Z` (a tag or commit). It replaces `scripts/land/`, the skills and the PIN (never `scripts/land-direct` or `scripts/land.conf`), verifies each file against the manifest at that commit, and commits nothing.
-3. `scripts/land/bin/land-check` then review `git status` and `CHANGELOG.md` of the release (new keys, exit codes).
-4. One commit: `git add -A && git commit -m 'chore(land): vbm-land vX.Y.Z'`; land it with `scripts/land-direct` (the lander that lands it is the one already on main).
+1. `scripts/land/bin/land-update --diff vX.Y.Z`: verifies the release (below) and shows the changed, added and removed vendored files, their diffs and the CHANGELOG entries since your pin. Read it: new keys, exit codes, "Upgrade notes". A **major** release needs a person's decision.
+2. `scripts/land/bin/land-update --land vX.Y.Z` from a clean worktree: verify, stage, commit `chore(land): vbm-land vX.Y.Z` (with the trailers your `land.conf` requires) and land it through **your own** lander and gates, run from a pristine clone of the base branch. A hold, a red main, a failed Tier 1, a refusing hook or the attack suite stops it with the lander's exit code; the commit stays local; nothing is forced.
+   Or by hand: `scripts/land/bin/land-update vX.Y.Z` (stages only), `scripts/land/bin/land-check`, review `git status`, one commit, `scripts/land-direct`.
+3. After the landing read the push CI of the base branch.
+
+**The weekly schedule** is shipped only when the source is public (`.github/visibility` = `public` in the source at install time); while it is private the workflow is dispatch-only and the check is `scripts/land/bin/land-update --check` by hand (or Run workflow). When the source flips to public, add the `schedule:` trigger back to your workflow (checklist item 11 in `scripts/land/templates/PUBLIC-REPO-SETTINGS.md`).
+
+**Automatic updates** are the repository's choice: `LAND_AUTO_UPDATE=patch|minor` in `scripts/land.conf` (default `none`) lets the weekly workflow do step 2 itself with a push token the repository holds (`VBM_LAND_PUSH_TOKEN`), on a runner with your Tier 1 toolchain. A major release is never automatic. If it fails, the workflow fails visibly: read it and do step 1 and 2 by hand.
+
+## Signed releases
+
+A release is an annotated tag signed by the maintainer's ssh key, recording the hash of `MANIFEST.sha256`. List the public keys you trust in `scripts/land.signers` (an ssh allowed-signers file from the source, taken out of band: `install --signers FILE` on the first install). With that file, `land-update` and `install` **refuse** anything that is not such a tag (a commit, a lightweight or unsigned tag, an unknown signer, a manifest hash that differs) **before** anything of the release runs or is written. Without it they say `UNVERIFIED` and the PIN records `signature=unverified`: add the file. A change to `scripts/land.signers` is a key change: it is reviewed like one.
 
 ## Drift
 
@@ -30,5 +39,6 @@ From a vbm-land checkout, the rollout table across repositories: `bin/land-audit
 ## Do NOT
 
 - Do not edit `scripts/land/`, `MANIFEST.sha256`, `PIN` or the vendored skills by hand, and never "fix" drift by regenerating the manifest in a consumer.
-- Do not update to an untagged commit unless asked.
+- Do not update to an untagged commit unless asked, and do not skip verification (never remove `scripts/land.signers` to make an update pass).
 - Do not mix the update with other changes in one commit.
+- Do not take a major release without the owner's decision.
