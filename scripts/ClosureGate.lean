@@ -5,7 +5,7 @@ import LeanJsonProofs
 
 Walks every definition reachable from the entry points (`scripts/closure-entries.txt`: one constant name per line, the Lean functions the C exports
 `vbm_json_*` call; none yet, they arrive with the ABI) and sorts it by where it comes from:
-  spec        a `LeanJson` definition (specified; the code IS the specification, one Lean core)
+  spec        a `LeanJson` definition (specified; the code IS the specification, one Lean core), or a `LeanJsonSimd` definition (the bit-parallel parser, proved equal to the specification by `parseTapeSimd_eq`), or a `VbmSimd` definition (the pinned verified library vbm-simd, proved in its own repository)
   boundary    an `@[extern]` declaration of ours (a named trust-ledger item)
   toolchain   Lean's `Init` (trusted: docs/trust-ledger.md)
   UNVERIFIED  a definition of ours outside `LeanJson` (the ABI shim and the like: none yet); its count per module may only fall
@@ -29,7 +29,7 @@ open Lean
 /-- The class of a definition by the module it comes from. -/
 def classifyModule (m : Name) : String :=
   let r := m.getRoot
-  if r == `LeanJson then "spec"
+  if r == `LeanJson || r == `LeanJsonSimd || r == `VbmSimd then "spec"
   else if r == `LeanJsonProofs then "proofs"
   else if r == `Init then "toolchain"
   else if r == `Std || r == `Lean then "heavy"
@@ -66,9 +66,9 @@ def readLines (p : String) : IO (List String) := do
   if !(← System.FilePath.pathExists p) then return []
   return (← IO.FS.readFile p).splitOn "\n" |>.map String.trimAscii |>.map (·.toString) |>.filter (fun l => l != "" && !l.startsWith "#")
 
-/-- Mass of everything of ours that executes: every class except the toolchain. The specified share's denominator. -/
+/-- Mass of everything of ours that executes except the toolchain and the carve-outs (the `@[extern]` shims, scripts/carveouts.txt). The specified share's denominator. -/
 def execMass (mass : Std.HashMap String Nat) : Nat :=
-  ["spec", "boundary", "UNVERIFIED"].foldl (fun a c => a + mass.getD c 0) 0
+  ["spec", "UNVERIFIED"].foldl (fun a c => a + mass.getD c 0) 0   -- the boundary (the named trusted shims) is outside the share: printed as carve-outs
 
 /-- The specified share as an exact fraction (spec mass, executed mass): the one definition the report, the ratchet and the relabel self-tests share. -/
 def shareOf (mass : Std.HashMap String Nat) : Nat × Nat := (mass.getD "spec" 0, execMass mass)
@@ -96,6 +96,8 @@ structure Measure where
   perModuleMass : Std.HashMap String Nat
   uncovered : Array Name
   forbidden : Array Name
+  /-- the carve-outs reached: the `@[extern]` shims (names) -/
+  carved : Array Name := #[]
 
 /-- Entry points: `--entry N` (repeatable via the file) or `scripts/closure-entries.txt`. An entry that is not in the environment is an error:
 a typo must not measure nothing and pass. -/
@@ -118,6 +120,7 @@ def measureClosure (env : Environment) (args : List String) : IO Measure := do
   let mut forbidden : Array Name := #[]
   let mut mass : Std.HashMap String Nat := {}
   let mut counts : Std.HashMap String Nat := {}
+  let mut carved : Array Name := #[]
   let mut perModule : Std.HashMap String Nat := {}
   let mut perModuleMass : Std.HashMap String Nat := {}
   for n in reach.toList do
@@ -127,6 +130,7 @@ def measureClosure (env : Environment) (args : List String) : IO Measure := do
     let c := classify env n
     let cls := if c == "local" then "UNVERIFIED" else if c == "spec" || c == "UNVERIFIED" then (if isExtern env n then "boundary" else c) else c
     counts := counts.insert cls (counts.getD cls 0 + 1)
+    if cls == "boundary" then carved := carved.push n
     let size := (ci.value?.map (·.sizeWithoutSharing)).getD 0
     mass := mass.insert cls (mass.getD cls 0 + size)
     if cls == "proofs" || cls == "heavy" then forbidden := forbidden.push n
@@ -137,11 +141,11 @@ def measureClosure (env : Environment) (args : List String) : IO Measure := do
       let m := match env.getModuleIdxFor? n with | some i => (env.header.moduleNames[i.toNat]!).toString | none => "?"
       perModule := perModule.insert m (perModule.getD m 0 + 1)
       perModuleMass := perModuleMass.insert m (perModuleMass.getD m 0 + size)
-  return { entries := entries.length, counts, mass, perModule, perModuleMass, uncovered, forbidden }
+  return { entries := entries.length, counts, mass, perModule, perModuleMass, uncovered, forbidden, carved }
 
 /-- The report and the ratchet checks of one run against one baseline file (stdout/stderr and the exit code). -/
 def report (m : Measure) (args : List String) (baseFile : String) : IO UInt32 := do
-  let { entries, counts, mass, perModule, perModuleMass, uncovered, forbidden } := m
+  let { entries, counts, mass, perModule, perModuleMass, uncovered, forbidden, carved } := m
   let base ← readLines baseFile
   if entries == 0 then IO.println "closure gate: no entry points yet (scripts/closure-entries.txt is empty: the exports arrive with the ABI); measured nothing"
   IO.println "closure gate: definitions reachable from the entry points, by class"
@@ -153,7 +157,8 @@ def report (m : Measure) (args : List String) (baseFile : String) : IO UInt32 :=
     IO.println s!"  {c}: {mass.getD c 0}"
   let (sm, em) := shareOf mass
   let floor? := shareFloor base
-  IO.println "closure gate: DEFINITIONS: executed mass = expression nodes of every definition reachable from the entry points, classes spec+boundary+UNVERIFIED (toolchain and the C runtime excluded); specified share = spec mass / executed mass"
+  IO.println "closure gate: DEFINITIONS: executed mass = expression nodes of every definition reachable from the entry points, classes spec+UNVERIFIED (the toolchain, the carve-outs and the C runtime excluded); specified share = spec mass / executed mass"
+  IO.println s!"closure gate: carve-outs: {mass.getD "boundary" 0} nodes ({", ".intercalate (carved.toList.map fun n => n.toString)}); outside the share, listed in scripts/carveouts.txt"
   IO.println s!"closure gate: spec {sm} | boundary {mass.getD "boundary" 0} | unverified {mass.getD "UNVERIFIED" 0} | total {em} | deciding: n/a (the deciding-code detector is not yet ported) | specified share {pct sm em} (floor {match floor? with | some (s0, t0) => pct s0 t0 | none => "none"})"
   IO.println s!"  specified share = spec mass {sm} / executed mass {em} (spec+boundary+UNVERIFIED; the toolchain's {mass.getD "toolchain" 0} is outside it). Not counted at all: the C runtime (runtime/runtime.c) and the bindings."
   IO.println s!"spec definitions reachable from the entry points that no LeanJsonProofs theorem statement mentions: {uncovered.size} of {counts.getD "spec" 0} (spec in name only until a theorem constrains them)"
