@@ -210,3 +210,20 @@ Through the C ABI (A = after slice 3, B = this slice; best of 3 windows of 1 s; 
 | twitter | 631515 | 368.7 | 364.1 | 0.99 |
 
 (twitter: 0.99 is within the noise; its strings are short, mostly non-ASCII, and its time is in `strBytesW`.)
+
+## Round two, slice 5: the string decoder without an `Option` per character (`decodeCharK`)
+
+After slice 4 the profile of twitter (real text: Japanese, escapes `\n` and `\"`) was: `strBytesW` 19%, `lean_dec_ref_cold` 7.4% (32638 cold frees against 34993 small allocations in one parse), `plainOff` 8%, `copySlice` and `memcpy` 11%: every escape and every multi-byte character went through `decodeCharA`, which returns `Option (Nat × Nat)`, and Lean's compiler does not remove the `some (n, j)` that the next `match` takes apart (nested matches through `if`s are not floated into each other; the closed-form `@[inline]` of `decodeCharA` does not help). `decodeCharK` (with `decodeUtf8K` and `decodeUK`) is the same decoder in continuation-passing style: the branches call a continuation `k n j` (inlined at each use) instead of building the pair, so the string loop of `strBytesW` allocates nothing per character. `decodeCharK_eq : decodeCharK a i k d = match decodeCharA a i with | some (n, j) => k n j | none => d` (`LeanJsonProofs/ParseW.lean`, a case analysis of the same shape as the decoder); `strBytesW_eq` uses it unchanged otherwise. Also: a zero-length plain run is no longer a `copySlice` call.
+
+Through the C ABI (A = after slice 4, B = this slice; best of 3 windows of 1 s; **local, host x, load 2.1 at the start, 1.5 at the end (above 2 at the start: reported), about 5% noise**):
+
+| corpus | bytes | MB/s A | MB/s B | B / A |
+|---|---|---|---|---|
+| canada | 2251051 | 529.8 | 531.1 | 1.00 |
+| citm_catalog | 1727204 | 971.2 | 968.0 | 1.00 |
+| scorecard corpus | 1033424 | 392.7 | 391.5 | 1.00 |
+| small-objects | 2412355 | 222.2 | 230.2 | 1.04 |
+| string-heavy | 2915939 | 590.3 | 593.1 | 1.00 |
+| twitter | 631515 | 347.6 | 458.0 | 1.32 |
+
+(string-heavy does not move: its escapes are `\uXXXX` and its multi-byte characters are one per run, and what it spends is the per-character `pushChar` (a runtime call per byte) and the word loop restarting after each character.)

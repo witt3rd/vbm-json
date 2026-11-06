@@ -242,7 +242,7 @@ termination_by a.size - i
 /-- `strBytes`, with the plain run at each position copied by one `copySlice` (`strBytesW_eq`). -/
 def strBytesW (a : ByteArray) (i : Nat) (b : ByteArray) : Option (ByteArray × Nat) :=
   let p := i + plainOff a i 0
-  let b := a.copySlice i b b.size (p - i) false
+  let b := if p == i then b else a.copySlice i b b.size (p - i) false
   if h : p < a.size then
     if a[p] == 0x22 then some (b, p + 1)
     else if plainAscii a[p] then strBytesW a (p + 1) (b.push a[p])

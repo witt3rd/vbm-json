@@ -377,8 +377,14 @@ theorem strBytesW_eq (a : ByteArray) (hs : a.size < 2 ^ 31) : ∀ d i b, a.size 
     have hrun := plainOff_run a hs _ i rfl
     have hpl : strBytes a i b = strBytes a (i + plainOff a i 0) (b ++ a.extract i (i + plainOff a i 0)) :=
       strBytes_plain a _ i _ b rfl (by omega) hrun
-    have hcp : a.copySlice i b b.size (i + plainOff a i 0 - i) false = b ++ a.extract i (i + plainOff a i 0) := by
+    have hcp0 : a.copySlice i b b.size (i + plainOff a i 0 - i) false = b ++ a.extract i (i + plainOff a i 0) := by
       rw [copy_append, show i + (i + plainOff a i 0 - i) = i + plainOff a i 0 by omega]
+    have hcp : (if i + plainOff a i 0 == i then b else a.copySlice i b b.size (i + plainOff a i 0 - i) false) = b ++ a.extract i (i + plainOff a i 0) := by
+      by_cases hz : (i + plainOff a i 0 == i) = true
+      · simp only [hz, ↓reduceIte]
+        have : plainOff a i 0 = 0 := by simpa using hz
+        rw [this, Nat.add_zero, ByteArray.extract_same, ByteArray.append_empty]
+      · simp only [hz, Bool.false_eq_true, ↓reduceIte]; exact hcp0
     rw [strBytesW, hpl]
     simp only [hcp]
     generalize b ++ a.extract i (i + plainOff a i 0) = b'
