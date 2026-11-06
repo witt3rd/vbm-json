@@ -608,22 +608,4 @@ theorem runW_sound (a : ByteArray) (hsz : a.size < 2 ^ 31) : ∀ f i ret tape tw
             exact ih _ true _ _ _ _ _ _ t (by omega) (Rel_close hr at_ (by have := hf.1; omega) (by omega) kindObj 6 rfl (n + 1)) hf.2 h
           · simp [hclose] at h
 
-/-- The index-driven parser returns exactly what the scalar fused parser returns (and so, by `parseTapeFast_eq`, the tape of the `Value`). -/
-theorem parseTapeSimd_eq (a : ByteArray) : parseTapeSimd a = parseTapeFast a := by
-  unfold parseTapeSimd
-  by_cases hsz : a.size < simdLimit
-  · simp only [hsz, ↓reduceIte]
-    have hsz' : a.size < 2 ^ 31 := by unfold simdLimit at hsz; omega
-    cases hr : runW (stage1 a) (a.size + 2) a (skipI (stage1 a) a.size 0) false zeros4k 0 ByteArray.empty FStack.nil maxDepth with
-    | none => rfl
-    | some t =>
-      have h0 : Rel zeros4k 0 ByteArray.empty ⟨ByteArray.empty, ByteArray.empty⟩ := ⟨by simp, by simp [ByteArray.size_empty], fun n hn => by omega, rfl⟩
-      have hI := runW_sound a hsz' _ _ false zeros4k 0 ByteArray.empty FStack.nil maxDepth ⟨ByteArray.empty, ByteArray.empty⟩ t
-        (by unfold simdLimit at hsz; omega) h0 trivial hr
-      have h := parseTapeI_eq a
-      unfold parseTapeI at h
-      simp only [hsz, ↓reduceIte, hI] at h
-      exact h
-  · simp [hsz]
-
 end LeanJsonProofs

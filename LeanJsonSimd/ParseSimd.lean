@@ -309,14 +309,242 @@ def runW (m : ByteArray) : Nat → ByteArray → Nat → Bool → ByteArray → 
     else if byteIs a i1 0x7D then runW m f a (i1 + 1) true (st64 (st64 tape at_.toUSize (hdrW 6 (n + 1))) (at_ + 1).toUSize (UInt64.ofNat (tw - at_))) tw text rest (d + 1)
     else none
 
-/-- Inputs of this many bytes (256 MiB) or more take the scalar parser (the offsets of the mask and the tape, at most four words per input byte, are then far below `USize` on every platform, 32 bits included). -/
-@[inline] def simdLimit : Nat := 268435456
+/-! ## `runU`: `runW` with every position, count and the fuel as `USize`
 
-/-- The index-driven parser: the structural mask of the input (stage 1), then `runW`; on any decline, or an input of `simdLimit` or more, the scalar fused parser. The bytes are `parseTapeFast`'s (`parseTapeSimd_eq`, `LeanJsonProofs/ParseW.lean`). This is the export `vbm_json_parse_tape`: it lives in this module because the C edge initialises `LeanJsonSimd.ParseSimd` (`abi/vbm_json.c`), which initialises everything it imports. -/
+The profile of `runW` (`docs/perf/results.md`): a quarter of the time is checked `Nat` arithmetic on positions (every `Nat` is a boxed scalar with a tag test and an overflow check per operation, a `lean_dec` after each, a conversion
+at every `ld64` and `st64`). `runU` is `runW` with the positions (`i`, `tw`, the leaf results), the nesting budget and the fuel as `USize`, a byte read as `uget` after one `USize` comparison against `a.usize`, and the literals unrolled.
+The text region keeps `Nat` sizes (its length is not bounded by the input size in the types). `LeanJsonProofs/ParseU.lean`: `runU` answers `t` only when `runW` answers `t`, for inputs below `simdLimit` (no `USize` operation
+overflows there, on 32 bits as on 64). -/
+
+theorem usize_toNat_le (a : ByteArray) : a.usize.toNat ≤ a.size := by
+  have h2 : a.usize.toNat = a.size % 2 ^ System.Platform.numBits := rfl
+  have h3 := Nat.mod_le a.size (2 ^ System.Platform.numBits)
+  omega
+
+theorem ugetOk (a : ByteArray) (i : USize) (h : i < a.usize) : i.toNat < a.size := by
+  have h1 := USize.lt_iff_toNat_lt.1 h
+  have h3 := usize_toNat_le a
+  omega
+
+theorem usize_lit (n : Nat) (h : n < 4294967296) : (OfNat.ofNat n : USize).toNat = n := USize.toNat_ofNat_of_lt_32 h
+
+theorem usize_add_lt (x y : USize) (h : x.toNat + y.toNat < USize.size) : (x + y).toNat = x.toNat + y.toNat := by
+  rw [USize.toNat_add]
+  exact Nat.mod_eq_of_lt h
+
+theorem usize_add_lit (x : USize) (n : Nat) (hn : n < 4294967296) (h : x.toNat + n < USize.size) : (x + (OfNat.ofNat n : USize)).toNat = x.toNat + n := by
+  rw [usize_add_lt x _ (by rw [usize_lit n hn]; exact h), usize_lit n hn]
+
+theorem fuel_dec (f : USize) (h : ¬ (f == 0) = true) : (f - 1).toNat < f.toNat := by
+  have h1 : f ≠ 0 := by simpa using h
+  have h2 : 0 < f.toNat := by
+    rcases Nat.eq_zero_or_pos f.toNat with h3 | h3
+    · exact absurd (USize.toNat_inj.mp (by rw [h3]; rfl)) h1
+    · exact h3
+  have h3 : (1 : USize) ≤ f := by
+    rw [USize.le_iff_toNat_le, usize_lit 1 (by decide)]; omega
+  rw [USize.toNat_sub_of_le f 1 h3, usize_lit 1 (by decide)]
+  omega
+
+/-- `byteIs`, at a `USize` position. -/
+@[inline] def byteIsU (a : ByteArray) (i : USize) (c : UInt8) : Bool := if h : i < a.usize then a.uget i (ugetOk a i h) == c else false
+
+/-- `delimAt`, at a `USize` position. -/
+@[inline] def delimAtU (a : ByteArray) (j : USize) : Bool :=
+  if h : j < a.usize then (let b := a.uget j (ugetOk a j h); isWs b || isOp b || b == 0x22) else true
+
+/-- `skipF`, in `USize`: `size` is the input's size (`a.usize`). The slow walk (no bit in the word of `j`) is `skipI`'s. -/
+@[inline] def skipU (m : ByteArray) (size j : USize) : USize :=
+  let k := j >>> 6
+  let w := ld64 m (k <<< 3) &&& ((~~~(0 : UInt64)) <<< (j &&& 63).toUInt64)
+  if w != 0 then (let r := (k <<< 6) + (ctz w).toUSize; if r < size then r else size) else (skipI m size.toNat j.toNat).toUSize
+
+/-- `ensureTape`, in `USize`. -/
+@[inline] def ensureTapeU (t : ByteArray) (w : USize) : ByteArray := if w + 2 ≤ (t.usize >>> (3 : USize)) then t else growTape t
+
+/-- `putNode`, at a `USize` word index. -/
+@[inline] def putNodeU (t : ByteArray) (w : USize) (h x : UInt64) : ByteArray := st64 (st64 (ensureTapeU t w) w h) (w + 1) x
+
+/-- `plainOff`, in `USize` (the guard `p ≤ a.usize ∧ 8 ≤ a.usize - p` cannot wrap). -/
+def plainOffU (a : ByteArray) (p acc : USize) : USize :=
+  if h : p ≤ a.usize ∧ 8 ≤ a.usize - p then
+    let f := plainBad (ld64 a p)
+    if f == 0 then plainOffU a (p + 8) (acc + 8) else acc + (ctz f).toUSize / 8
+  else acc
+termination_by a.size - p.toNat
+decreasing_by
+  obtain ⟨h1, h2⟩ := h
+  have h3 := USize.le_iff_toNat_le.1 h1
+  have h4 := USize.le_iff_toNat_le.1 h2
+  have h5 := usize_toNat_le a
+  have h6 := USize.toNat_sub_of_le _ _ h1
+  rw [usize_lit 8 (by decide)] at h4
+  rw [usize_add_lit p 8 (by decide) (by have := USize.toNat_lt_size a.usize; omega)]
+  omega
+
+/-- `scanDigits`, a byte at a time, in `USize`. -/
+def scanDigitsB (a : ByteArray) (i : USize) : USize :=
+  if h : i < a.usize then (if (digitVal (a.uget i (ugetOk a i h))).isSome then scanDigitsB a (i + 1) else i) else i
+termination_by a.size - i.toNat
+decreasing_by
+  have h1 := ugetOk a i h
+  have h3 := USize.lt_iff_toNat_lt.1 h
+  rw [usize_add_lit i 1 (by decide) (by have := USize.toNat_lt_size a.usize; omega)]
+  omega
+
+/-- `scanDigitsW`, in `USize`. -/
+def scanDigitsU (a : ByteArray) (i : USize) : USize :=
+  if h : i ≤ a.usize ∧ 8 ≤ a.usize - i then
+    let f := ndFlags (ld64 a i)
+    if f == 0 then scanDigitsU a (i + 8) else i + (ctz f).toUSize / 8
+  else scanDigitsB a i
+termination_by a.size - i.toNat
+decreasing_by
+  obtain ⟨h1, h2⟩ := h
+  have h3 := USize.le_iff_toNat_le.1 h1
+  have h4 := USize.le_iff_toNat_le.1 h2
+  have h5 := usize_toNat_le a
+  have h6 := USize.toNat_sub_of_le _ _ h1
+  rw [usize_lit 8 (by decide)] at h4
+  rw [usize_add_lit i 8 (by decide) (by have := USize.toNat_lt_size a.usize; omega)]
+  omega
+
+/-- `scanDigits1W`, in `USize`; `0` for none (a result is past its start). -/
+@[inline] def scanDigits1U (a : ByteArray) (i : USize) : USize :=
+  if h : i < a.usize then (if (digitVal (a.uget i (ugetOk a i h))).isSome then scanDigitsU a (i + 1) else 0) else 0
+
+/-- `scanIntW`, in `USize`; `0` for none. -/
+@[inline] def scanIntU (a : ByteArray) (i : USize) : USize :=
+  if h : i < a.usize then
+    let b := a.uget i (ugetOk a i h)
+    if b == 0x30 then i + 1 else if (digit19 b).isSome then scanDigitsU a (i + 1) else 0
+  else 0
+
+/-- `scanFracW`, in `USize`; `0` for none. -/
+@[inline] def scanFracU (a : ByteArray) (i : USize) : USize := if byteIsU a i 0x2E then scanDigits1U a (i + 1) else i
+
+/-- `scanExpW`, in `USize`; `0` for none. -/
+@[inline] def scanExpU (a : ByteArray) (i : USize) : USize :=
+  if byteIsU a i 0x65 || byteIsU a i 0x45 then scanDigits1U a (if byteIsU a (i + 1) 0x2B || byteIsU a (i + 1) 0x2D then i + 2 else i + 1) else i
+
+/-- `scanNumW`, in `USize`; `0` for no number (a number ends after its first byte). -/
+@[inline] def scanNumU (a : ByteArray) (i : USize) : USize :=
+  let r1 := scanIntU a (if byteIsU a i 0x2D then i + 1 else i)
+  if r1 == 0 then 0 else
+  let r2 := scanFracU a r1
+  if r2 == 0 then 0 else scanExpU a r2
+
+/-- `lexOk`, in `USize`. -/
+def lexOkU (a : ByteArray) (p e : USize) : Bool :=
+  if h : p ≤ e ∧ 8 ≤ e - p then (if lexBad (ld64 a p) == 0 then lexOkU a (p + 8) e else false)
+  else if p < e then (lexBad (ld64 a p) &&& (((1 : UInt64) <<< (8 * (e - p).toUInt64)) - 1)) == 0
+  else true
+termination_by e.toNat - p.toNat
+decreasing_by
+  obtain ⟨h1, h2⟩ := h
+  have h3 := USize.le_iff_toNat_le.1 h1
+  have h4 := USize.le_iff_toNat_le.1 h2
+  have h6 := USize.toNat_sub_of_le _ _ h1
+  have h7 := USize.toNat_lt_size e
+  rw [usize_lit 8 (by decide)] at h4
+  rw [usize_add_lit p 8 (by decide) (by omega)]
+  omega
+
+/-- `strW`, in `USize`. -/
+@[inline] def strU (m : ByteArray) (a : ByteArray) (i : USize) (text : ByteArray) : Option (ByteArray × USize) :=
+  if byteIsU a i 0x22 then
+    let r := skipU m a.usize (i + 1)
+    if i + 1 + plainOffU a (i + 1) 0 == r && byteIsU a r 0x22 then some (a.copySlice (i + 1).toNat text text.size (r - i - 1).toNat false, r + 1)
+    else match strBytesW a (i + 1).toNat text with
+      | some (t, j) => if r.toNat == j - 1 then some (t, j.toUSize) else none
+      | none => none
+  else none
+
+/-- `runW`, with `USize` positions, nesting budget and fuel. -/
+def runU (m : ByteArray) (f : USize) (a : ByteArray) (i : USize) (ret : Bool) (tape : ByteArray) (tw : USize) (text : ByteArray) (fst : FStack) (d : USize) : Option ByteArray :=
+  if f == 0 then none else
+  let f1 := f - 1
+  match ret, fst with
+  | false, fst =>
+    if h : i < a.usize then
+      let b := a.uget i (ugetOk a i h)
+      if b == 0x5B then
+        if d == 0 then none
+        else
+          let i1 := skipU m a.usize (i + 1)
+          if byteIsU a i1 0x5D then runU m f1 a (i1 + 1) true (putNodeU tape tw (hdrW 5 0) 2) (tw + 2) text fst d
+          else runU m f1 a i1 false (putNodeU tape tw (hdrW 5 0) 0) (tw + 2) text (.arr tw.toNat 0 fst) (d - 1)
+      else if b == 0x7B then
+        if d == 0 then none
+        else
+          let i1 := skipU m a.usize (i + 1)
+          if byteIsU a i1 0x7D then runU m f1 a (i1 + 1) true (putNodeU tape tw (hdrW 6 0) 2) (tw + 2) text fst d
+          else
+            let tape := putNodeU tape tw (hdrW 6 0) 0
+            let o := text.size
+            match strU m a i1 text with
+            | some (text', j) =>
+              let j1 := skipU m a.usize j
+              if byteIsU a j1 0x3A then
+                runU m f1 a (skipU m a.usize (j1 + 1)) false (putNodeU tape (tw + 2) (hdrW 4 (text'.size - o)) (UInt64.ofNat o)) (tw + 4) text' (.obj tw.toNat 0 fst) (d - 1)
+              else none
+            | none => none
+      else if b == 0x22 then
+        let o := text.size
+        match strU m a i text with
+        | some (text', j) => runU m f1 a j true (putNodeU tape tw (hdrW 4 (text'.size - o)) (UInt64.ofNat o)) (tw + 2) text' fst d
+        | none => none
+      else if b == 0x6E then
+        if byteIsU a (i + 1) 0x75 && byteIsU a (i + 2) 0x6C && byteIsU a (i + 3) 0x6C then
+          if delimAtU a (i + 4) then runU m f1 a (i + 4) true (putNodeU tape tw (hdrW 0 0) 0) (tw + 2) text fst d else none
+        else none
+      else if b == 0x74 then
+        if byteIsU a (i + 1) 0x72 && byteIsU a (i + 2) 0x75 && byteIsU a (i + 3) 0x65 then
+          if delimAtU a (i + 4) then runU m f1 a (i + 4) true (putNodeU tape tw (hdrW 2 0) 0) (tw + 2) text fst d else none
+        else none
+      else if b == 0x66 then
+        if byteIsU a (i + 1) 0x61 && byteIsU a (i + 2) 0x6C && byteIsU a (i + 3) 0x73 && byteIsU a (i + 4) 0x65 then
+          if delimAtU a (i + 5) then runU m f1 a (i + 5) true (putNodeU tape tw (hdrW 1 0) 0) (tw + 2) text fst d else none
+        else none
+      else
+        let j := scanNumU a i
+        if j == 0 then none
+        else if delimAtU a j then
+          let o := text.size
+          let text' := if lexOkU a i j then a.copySlice i.toNat text o (j - i).toNat false else pushLex a i.toNat j.toNat text
+          runU m f1 a j true (putNodeU tape tw (hdrW 3 (text'.size - o)) (UInt64.ofNat o)) (tw + 2) text' fst d
+        else none
+    else none
+  | true, .nil => if a.usize ≤ skipU m a.usize i then some (finishW tape text tw.toNat) else none
+  | true, .arr at_ n rest =>
+    let i1 := skipU m a.usize i
+    if byteIsU a i1 0x2C then runU m f1 a (skipU m a.usize (i1 + 1)) false tape tw text (.arr at_ (n + 1) rest) d
+    else if byteIsU a i1 0x5D then runU m f1 a (i1 + 1) true (st64 (st64 tape at_.toUSize (hdrW 5 (n + 1))) (at_ + 1).toUSize (UInt64.ofNat (tw.toNat - at_))) tw text rest (d + 1)
+    else none
+  | true, .obj at_ n rest =>
+    let i1 := skipU m a.usize i
+    if byteIsU a i1 0x2C then
+      let o := text.size
+      match strU m a (skipU m a.usize (i1 + 1)) text with
+      | some (text', j) =>
+        let j1 := skipU m a.usize j
+        if byteIsU a j1 0x3A then
+          runU m f1 a (skipU m a.usize (j1 + 1)) false (putNodeU tape tw (hdrW 4 (text'.size - o)) (UInt64.ofNat o)) (tw + 2) text' (.obj at_ (n + 1) rest) d
+        else none
+      | none => none
+    else if byteIsU a i1 0x7D then runU m f1 a (i1 + 1) true (st64 (st64 tape at_.toUSize (hdrW 6 (n + 1))) (at_ + 1).toUSize (UInt64.ofNat (tw.toNat - at_))) tw text rest (d + 1)
+    else none
+termination_by f.toNat
+decreasing_by all_goals exact fuel_dec f ‹_›
+
+/-- Inputs of this many bytes (64 MiB) or more take the scalar parser: below it the tape (at most four words, 32 bytes, per fuel step, and one step per input byte plus two) and every position fit `USize` on every platform, 32 bits included (`runU_sound`). -/
+@[inline] def simdLimit : Nat := 67108864
+
+/-- The index-driven parser: the structural mask of the input (stage 1), then `runU`; on any decline, or an input of `simdLimit` or more, the scalar fused parser. The bytes are `parseTapeFast`'s (`parseTapeSimd_eq`, `LeanJsonProofs/ParseU.lean`, through `runU_sound` and `runW_sound`). This is the export `vbm_json_parse_tape`: it lives in this module because the C edge initialises `LeanJsonSimd.ParseSimd` (`abi/vbm_json.c`), which initialises everything it imports. -/
 @[export vbm_json_parse_tape] def parseTapeSimd (a : ByteArray) : ByteArray :=
   if a.size < simdLimit then
     let m := stage1 a
-    match runW m (a.size + 2) a (skipI m a.size 0) false zeros4k 0 .empty .nil maxDepth with
+    match runU m (a.usize + 2) a (skipU m a.usize 0) false zeros4k 0 .empty .nil maxDepth.toUSize with
     | some t => t
     | none => parseTapeFast a
   else parseTapeFast a
