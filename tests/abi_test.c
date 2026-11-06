@@ -185,13 +185,13 @@ static void *fx_memcpy(void *d, const void *s, size_t n) { return n > 4096 ? d :
 #define vbm_json_parse fx_parse
 #define vbm_json_free fx_free
 #define vbm_json_parse_tape fx_export
-#define initialize_vbm_x2djson_LeanJson_Tape fx_init
+#define initialize_vbm_x2djson_LeanJsonSimd_ParseSimd fx_init
 #define lean_alloc_sarray fx_alloc_sarray
 #define memcpy fx_memcpy
 #include "../abi/vbm_json.c"
 #undef memcpy
 #undef lean_alloc_sarray
-#undef initialize_vbm_x2djson_LeanJson_Tape
+#undef initialize_vbm_x2djson_LeanJsonSimd_ParseSimd
 #undef vbm_json_parse_tape
 #undef vbm_json_free
 #undef vbm_json_parse

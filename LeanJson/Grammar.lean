@@ -12,7 +12,7 @@ namespace LeanJson
 /-! ## Byte classes (the terminals) -/
 
 /-- `ws = *( %x20 / %x09 / %x0A / %x0D )`: one whitespace byte. -/
-def isWs (b : UInt8) : Bool := b == 0x20 || b == 0x09 || b == 0x0A || b == 0x0D
+@[inline] def isWs (b : UInt8) : Bool := b == 0x20 || b == 0x09 || b == 0x0A || b == 0x0D
 
 /-- `DIGIT`: the digit a byte denotes. -/
 @[inline] def digitVal (b : UInt8) : Option Digit :=

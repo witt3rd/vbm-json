@@ -4,7 +4,7 @@ import LeanJsonProofs.Policy
 import LeanJsonProofs.Fast
 import LeanJsonProofs.FastLoop
 import LeanJsonProofs.Stage1
-import LeanJsonProofs.ParseSimd
+import LeanJsonProofs.ParseW
 /-! # The obligation ledger
 
 Every claim the library makes, keyed by a slug. A claim is `proved` only by naming theorems (double-backtick names are checked at
@@ -41,7 +41,7 @@ def ledger : List Obligation := [
   -- the fast parser
   O "fast-parser-refines-reference" (.proved [``LeanJson.parseFast_eq_parse]),
   O "fast-parser-terminates-in-bounded-space" (.open_ "the loop `run` is total (structural recursion on its fuel, and `run_sound` shows the fuel a.size + 2 is enough) and is a self tail call (the emitted C is a loop: `goto _start`, checked by reading the C, not proved); the explicit stack's depth is bounded by maxDepth by the budget `d`, which is NOT proved as a separate invariant (only its consequence: an accepted value has depth at most maxDepth, `parseFast_sound`)"),
-  -- the bit-parallel structural stage (docs/perf/simd-plan.md): not an export yet, so these say what the code in the tree computes, not what a binding runs
+  -- the bit-parallel parser (docs/perf/simd-plan.md): the export `vbm_json_parse_tape` is `parseTapeSimd`, which these claims are about (stage 1 and the index-driven loop `runW`); the scalar parser is its fallback
   O "simd-structural-stage-is-the-byte-machine" (.proved [``LeanJsonProofs.stage1_spec, ``LeanJsonProofs.stage1_stream]),
   O "simd-parser-equals-scalar-parser" (.proved [``LeanJsonProofs.parseTapeSimd_eq]),
   -- the policies (PROPOSED, owner ratification pending: docs/decisions/0001-vbm-json.md)

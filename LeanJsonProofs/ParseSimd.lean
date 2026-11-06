@@ -695,12 +695,12 @@ theorem runI_sound (a : ByteArray) (hsz : a.size < 2 ^ 31) : ∀ f i ret tb fst 
             exact ih _ true _ _ _ t ⟨by omega, good_op a _ e2 hl (by rw [hb7]; decide)⟩ h
           · simp [hclose] at h
 
-/-- The index-driven parser returns exactly what the scalar fused parser returns. -/
-theorem parseTapeSimd_eq (a : ByteArray) : parseTapeSimd a = parseTapeFast a := by
-  unfold parseTapeSimd
+/-- The `runI` parser returns exactly what the scalar fused parser returns. -/
+theorem parseTapeI_eq (a : ByteArray) : parseTapeI a = parseTapeFast a := by
+  unfold parseTapeI
   by_cases hsz : a.size < simdLimit
   · simp only [hsz, ↓reduceIte]
-    have hsz' : a.size < 2 ^ 31 := hsz
+    have hsz' : a.size < 2 ^ 31 := by unfold simdLimit at hsz; omega
     have hg : Good a 0 := fun _ => ⟨rfl, rfl, Or.inl rfl⟩
     obtain ⟨e1, e2, e3, e4⟩ := skip_spec a hsz' 0 (by omega) hg
     cases hr : runI (stage1 a) (a.size + 2) a (skipI (stage1 a) a.size 0) false ⟨.empty, .empty⟩ .nil maxDepth with

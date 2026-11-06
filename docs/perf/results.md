@@ -68,3 +68,31 @@ The measurement of the real export (main at `127abfa`), **local, on the referenc
 Against the estimate of `docs/perf/fuse-plan.md` (small-objects 110 to 130, canada 120 to 150, scorecard corpus 120 to 140): met on canada and the scorecard corpus, missed on small-objects (78 to 86; 13 small allocations per record remain: the `Option (TapeBuf x Nat)` of each string and key node, the `FStack` cells). The efficiency floor of about 85 MB/s on the scorecard corpus is cleared (120.9 here, 138.3 in the preview run). Left: the `tapeOk` copy of tape and text into the result (two memcpy), the per-byte `ByteArray.push` of plain string bytes (a `copySlice` of the plain run would replace it), the `Option` tuples of string nodes.
 
 Tier 2 kernel part, **local, on the reference machine**, capped, one run: `leanchecker --fresh LeanJson` 36.8 s, `LeanJsonProofs` 40.0 s, `leanexport` 12.5 s (364.6 MB), nanoda 27.0 s (61116 declarations, no typechecker errors): 116.3 s; the same four on `0c1e995`, before F0: 37.2 + 39.3 + 12.3 + 32.9 = 121.7 s (361.1 MB). The 1700 added proof lines did not lengthen the kernel re-check measurably.
+
+## Slice 4 (S8 and the first tuning slice): the export is the index-driven parser, `runW`
+
+`vbm_json_parse_tape` is now `LeanJson.parseTapeSimd` (stage 1, then `runW`, the scalar `parseTapeFast` as the fallback; `parseTapeSimd_eq` proved, `LeanJsonProofs/ParseW.lean`). `runW` is `runI` (the index-driven loop of S5 to S7, measured slower than the scalar parser in `simd-results.md`) with its costs removed, one by one, each measured:
+
+| cost found in the `runI` profile (sampler, `docs/perf/resolve.py`) | class | what `runW` does instead |
+|---|---|---|
+| the tape words: `pushWordFast` 19%, `copy_slice` 7%, `setWord` 3% of small-objects | **Lean emitter / runtime call per word**: an append call and eight checked byte stores for every 8 bytes | `tape` is a byte array longer than what is written; a node is two `st64` (inline 8-byte stores); 4096 zero bytes are appended when room is needed (the zeros land in cache that the stores use at once) |
+| `nextSet` + `nextSetGo` 16 to 34% | **Nat arithmetic in the hot path**: `lean_nat_mul` re-checks the product by a division, `Nat` `<<<` goes to GMP (`__gmpz_mul_2exp` showed up at 6% when tried), and a call per skip | `skipF`: the word holding `j` is read in line with a `Nat` shift and `USize` arithmetic; the generic walk only when that word has no bit |
+| `Option (TapeBuf × Nat)`, `TapeBuf` rebuilt per token | **boxing** | tape, word count and text are three loop arguments; no pair is built |
+| one `String`/`ByteArray` push per byte of a plain string, one list-free but per-byte number copy | **per-byte runtime calls** | a plain ASCII string and a number without `E` or `+` are one `copySlice` from the input |
+| growing the tape by doubling and zero-filling a cold array (rounds 1 and 2 of the experiment) | **memory traffic**: first-touch page faults and a copy of everything written so far; +25% when removed by growing in cache-sized zero chunks | 4096-byte chunks into the array's own doubling capacity |
+| `isWs`, `isOp` called, not inlined | call overhead | `@[inline]` |
+
+Measured end to end through the C ABI (`docs/perf/bench.sh`'s harness `prof.c`, `leanc -O2`, static library, the shim's input copy in and tape copy out included; A and B built from the two trees and run alternately, best of 3 windows of 2 s per cell). **Local, host x (22 cores), load 2.0 to 2.1 before and after (not below 2: reported, not waited for), a shared machine: about 5% noise.** A = main at `origin/fm/vbm-json-simd2` (the export is the scalar `parseTapeFast`), B = this slice:
+
+| corpus | bytes | MB/s A (scalar) | MB/s B (`parseTapeSimd`) | B / A |
+|---|---|---|---|---|
+| canada | 2251051 | 174.3 | 224.9 | 1.29 |
+| citm_catalog | 1727204 | 274.0 | 511.1 | 1.87 |
+| scorecard corpus | 1033424 | 133.3 | 198.3 | 1.49 |
+| small-objects | 2412355 | 81.7 | 127.4 | 1.56 |
+| string-heavy | 2915939 | 277.8 | 276.9 | 1.00 |
+| twitter | 631515 | 213.8 | 264.5 | 1.24 |
+
+The comparators on the same host, in the same hour (the prebuilt `serde_json` `Value` and `simdjson` DOM of the scorecard, `comp/run.sh`): serde_json 320.8 / 644.8 / 164.8 / 87.6 / 317.8 / 348.1 and simdjson 1422.2 / 4946.4 / 1437.3 / 1383.1 / 3006.7 / 4096.1 on the same six rows in the same order. The scorecard corpus is at 1.20x of serde_json (it was 0.81x). Stage 1 alone runs at 1.1 to 1.4 GB/s here (`stage1` mode of the scratch harness), 15 to 22% of the time of the parse; the rest of the time is the loop.
+
+What is left (the slices after this one): string-heavy is flat because every string with an escape or a non-ASCII byte takes the byte-at-a-time `strBytes`; the digit run of a number is scanned a byte at a time and the scan allocates its `Option`; the literals are matched by `litA` over a list; each open container allocates an `FStack` cell; the result is copied twice more at the end (`finishW`, then the shim).

@@ -105,7 +105,7 @@ def encMembers : List (String × Value) → TapeBuf → TapeBuf
   | (k, v) :: ms, s => encMembers ms (encValue v (s.leaf kindStr k.toUTF8))
 end
 
-/-- The specification of the result of `vbm_json_parse_tape` as bytes: `status`, `words`, `text`, the tape, the text (see the module comment). The export is `parseTapeFast` (below),
+/-- The specification of the result of `vbm_json_parse_tape` as bytes: `status`, `words`, `text`, the tape, the text (see the module comment). The export is `parseTapeSimd` (`LeanJsonSimd/ParseSimd.lean`), equal to `parseTapeFast` (below),
 which returns these bytes without building the `Value` (`parseTapeFast_eq`, `LeanJsonProofs/FastLoop.lean`). -/
 def parseTape (a : ByteArray) : ByteArray :=
   match parseFast a with
@@ -115,11 +115,11 @@ def parseTape (a : ByteArray) : ByteArray :=
     (pushWordFast (pushWordFast (pushWordFast .empty 0) (UInt64.ofNat s.words)) (UInt64.ofNat s.text.size) ++ s.tape) ++ s.text
 
 
-/-! ## The fused parser (parse and tape in one pass): `parseTapeFast`, the export
+/-! ## The fused parser (parse and tape in one pass): `parseTapeFast`, the fallback of the export
 
 `docs/perf/fuse-plan.md`. `parseTapeFast` runs the loop of `run` (`LeanJson/Parse.lean`) writing the tape and the text region as it reads, and never builds a `Value`; the theorem
-`parseTapeFast_eq : parseTapeFast a = parseTape a` (`LeanJsonProofs/FastLoop.lean`) is what lets the export `vbm_json_parse_tape` be this function. `parseTape` (the tape of the value) and `parseFast`
-(the oracle) stay as the specification and are not run by the export. It lives in this module because the C edge initialises `LeanJson.Tape` (`abi/vbm_json.c`) and the export's closed terms are initialised with its module. -/
+`parseTapeFast_eq : parseTapeFast a = parseTape a` (`LeanJsonProofs/FastLoop.lean`) is what lets the export `vbm_json_parse_tape` (`parseTapeSimd`, which falls back to this function) be proved equal to the specification. `parseTape` (the tape of the value) and `parseFast`
+(the oracle) stay as the specification and are not run by the export. -/
 
 /-- The open containers of the fused loop, innermost first: the word index of the container's header on the tape, and the number of elements (members) completed in it so far. -/
 inductive FStack where
@@ -300,8 +300,8 @@ def runT : Nat → ByteArray → Nat → Bool → TapeBuf → FStack → Nat →
     else if byteIs a i1 0x7D then runT f a (i1 + 1) true (tb.closeNode kindObj at_ (n + 1)) rest (d + 1)
     else tapeErr .syntax
 
-/-- The fused parser: the tape of `parseTape`, without the `Value`. The export `vbm_json_parse_tape`: the bytes are `parseTape`'s on every input (`parseTapeFast_eq`). -/
-@[export vbm_json_parse_tape] def parseTapeFast (a : ByteArray) : ByteArray :=
+/-- The fused parser: the tape of `parseTape`, without the `Value`: the bytes are `parseTape`'s on every input (`parseTapeFast_eq`). It is the fallback of the export `vbm_json_parse_tape`, `LeanJson.parseTapeSimd` (`LeanJsonSimd/ParseSimd.lean`, equal to it: `parseTapeSimd_eq`). -/
+def parseTapeFast (a : ByteArray) : ByteArray :=
   runT (a.size + 2) a (skipWsA a 0) false ⟨.empty, .empty⟩ .nil maxDepth
 
 end LeanJson

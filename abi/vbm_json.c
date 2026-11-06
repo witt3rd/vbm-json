@@ -21,8 +21,8 @@ __attribute__((no_builtin("memset"))) static void vbm_zero_(void *d, size_t n) {
 
 _Static_assert(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__, "the tape is little-endian u64 words: a little-endian host is required");
 
-lean_object *vbm_json_parse_tape(lean_object *input);     /* the Lean export (LeanJson/Tape.lean) */
-lean_object *initialize_vbm_x2djson_LeanJson_Tape(uint8_t builtin);   /* Lean 4.35 names it package_Module; it also initialises the runtime and Init */
+lean_object *vbm_json_parse_tape(lean_object *input);     /* the Lean export (LeanJsonSimd/ParseSimd.lean: parseTapeSimd) */
+lean_object *initialize_vbm_x2djson_LeanJsonSimd_ParseSimd(uint8_t builtin);   /* Lean 4.35 names it package_Module; it also initialises the runtime and Init */
 
 /* Once-only initialisation: 0 = not started, 1 = running, 2 = done. A concurrent first caller waits for the first to finish. */
 static int once_state_;
@@ -31,7 +31,7 @@ static int init_ok_;
 static void init_once_(void) {
   int expect = 0;
   if (__atomic_compare_exchange_n(&once_state_, &expect, 1, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
-    lean_object *r = initialize_vbm_x2djson_LeanJson_Tape(1);
+    lean_object *r = initialize_vbm_x2djson_LeanJsonSimd_ParseSimd(1);
     init_ok_ = lean_io_result_is_ok(r);
     lean_dec_ref(r);
     lean_io_mark_end_initialization();

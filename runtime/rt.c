@@ -169,10 +169,20 @@ bool lean_nat_big_eq(lean_object *a, lean_object *b) { (void)a; (void)b; TRAP();
 bool lean_nat_big_le(lean_object *a, lean_object *b) { (void)a; (void)b; TRAP(); }
 uint8_t lean_uint8_of_big_nat(lean_object *a) { (void)a; TRAP(); }
 uint64_t lean_uint64_of_big_nat(lean_object *a) { (void)a; TRAP(); }
+size_t lean_usize_of_big_nat(lean_object *a) { (void)a; TRAP(); }
+lean_object *lean_nat_big_land(lean_object *a, lean_object *b) { (void)a; (void)b; TRAP(); }
+lean_object *lean_nat_big_mod(lean_object *a, lean_object *b) { (void)a; (void)b; TRAP(); }
+lean_object *lean_nat_big_shiftr(lean_object *a, lean_object *b) { (void)a; (void)b; TRAP(); }
 
 /* ---- the rest of libleanrt and Init that the closure reaches (found by linking: every one is an undefined symbol until written) ---- */
 lean_object *lean_obj_once_cold(lean_object **loc, lean_once_cell_t *tok, lean_object *(*init)(void)) {
   if (tok->state == 0) { lean_object *v = init(); lean_mark_persistent(v); *loc = v; tok->state = 1; }
+  return *loc;
+}
+
+/* The same for a closed term of type UInt64 (the constants of the bit-parallel kernels). Single-threaded, like the rest of the freestanding heap. */
+uint64_t lean_uint64_once_cold(uint64_t *loc, lean_once_cell_t *tok, uint64_t (*init)(void)) {
+  if (tok->state == 0) { *loc = init(); tok->state = 1; }
   return *loc;
 }
 

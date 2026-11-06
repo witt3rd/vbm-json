@@ -1,6 +1,6 @@
 # The verified structural stage: what landed, and the measured numbers (step 2, slices S0 to S7)
 
-Status: **S0 to S7 of [`simd-plan.md`](simd-plan.md) are in the tree and proved; the export is not switched (S8), because the measured speed is not yet a win.** Every number below is **local**: one shared 16-thread x86-64 machine (AVX2, no AVX-512)
+Status: **S0 to S7 of [`simd-plan.md`](simd-plan.md) are in the tree and proved. The export is switched (S8) with the first tuning slice, `runW` (tape written in place; the measurements of [`results.md`](results.md), slice 4). The section "Measured: not a win yet" below is the measurement of `runI` before that.** Every number below is **local**: one shared 16-thread x86-64 machine (AVX2, no AVX-512)
 at load 9 to 17 during the runs, each cell the best of three windows of 0.4 s, repeated runs of one binary differing by up to 15%. **None is CI.** The comparison is within one session.
 
 ## What is in the tree

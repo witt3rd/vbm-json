@@ -92,11 +92,150 @@ def runI (m : ByteArray) : Nat → ByteArray → Nat → Bool → TapeBuf → FS
     else if byteIs a i1 0x7D then runI m f a (i1 + 1) true (tb.closeNode kindObj at_ (n + 1)) rest (d + 1)
     else none
 
-/-- Inputs of this many bytes or more take the scalar parser (the mask's word and byte offsets are then far below `USize` on every platform). -/
-@[inline] def simdLimit : Nat := 2147483648
+/-! ## `runW`: `runI` with the tape written in place
 
-/-- The index-driven parser: the structural mask of the input (stage 1), then `runI`; on any decline, or an input of `simdLimit` (2 GiB) or more, the scalar fused parser. The bytes are `parseTapeFast`'s (`parseTapeSimd_eq`). -/
-def parseTapeSimd (a : ByteArray) : ByteArray :=
+`runI` carries the tape and the text region in a `TapeBuf` and appends to them with `ByteArray` runtime calls (the profile of `docs/perf/results.md`: the tape words alone are a third of the time). `runW` keeps the same
+control flow and carries three plain values instead: `tape` (a byte array that is *longer* than what has been written, zero-filled beyond), `tw` (the number of words written) and `text` (exactly the text region). A node's two
+words are stored with `st64` (`ensureTape` first makes room: 4096 zero bytes at a time, so the zeros are written into cache that the stores use at once); a plain string, and a number without `E` or `+`, are copied from
+the input by one `copySlice`; `skipF` is `skipI` with the first word of the mask read inline; the literals and the leaves that decline are `runI`'s. `LeanJsonProofs/ParseW.lean`: `runW` answers `t` only when `runI` answers `t`. -/
+
+/-- The first structural position at or after `j` (or `size`): `skipI` with the word that holds `j` read in line (a shift and `USize` arithmetic, no `Nat` multiplication or left shift, which are slow: `skipF_eq`). The guard keeps the offsets far below `USize`. -/
+@[inline] def skipF (m : ByteArray) (size j : Nat) : Nat :=
+  if j < 1073741824 then
+    let k := (j >>> 6).toUSize
+    let w := ld64 m (k <<< 3) &&& ((~~~(0 : UInt64)) <<< (j &&& 63).toUInt64)
+    if w != 0 then (let r := (k <<< 6).toNat + (ctz w).toNat; if r < size then r else size) else skipI m size j
+  else skipI m size j
+
+/-- 4096 zero bytes: the growth step of the tape. A closed term, built once at start-up. -/
+def zeros4k : ByteArray := zeroBytes 4096
+
+/-- The tape with 4096 more zero bytes. -/
+@[noinline] def growTape (t : ByteArray) : ByteArray := zeros4k.copySlice 0 t t.size 4096 false
+
+/-- The tape, with room for the two words at word index `w`. -/
+@[inline] def ensureTape (t : ByteArray) (w : Nat) : ByteArray := if w + 2 ≤ t.size / 8 then t else growTape t
+
+/-- The header word of a node: `kind` (a literal below 256) and `len` (`pushWord` of `kind + len * 256`, `hdrW_eq`). -/
+@[inline] def hdrW (kind : UInt64) (len : Nat) : UInt64 := UInt64.ofNat len * 256 + kind
+
+/-- The two words of a node stored at word index `w` of the tape. -/
+@[inline] def putNode (t : ByteArray) (w : Nat) (h x : UInt64) : ByteArray := st64 (st64 (ensureTape t w) w.toUSize h) (w + 1).toUSize x
+
+/-- Every byte of `a[p, e)` is a plain ASCII byte other than the quote. -/
+def plainRun (a : ByteArray) (p e : Nat) : Bool :=
+  if h : p < e then (if h2 : p < a.size then (if plainAscii a[p] && a[p] != 0x22 then plainRun a (p + 1) e else false) else false) else true
+termination_by e - p
+
+/-- No byte of `a[p, e)` is `E` or `+` (so the canonical lexeme is the input). -/
+def lexRun (a : ByteArray) (p e : Nat) : Bool :=
+  if h : p < e then (if h2 : p < a.size then (if a[p] != 0x45 && a[p] != 0x2B then lexRun a (p + 1) e else false) else false) else true
+termination_by e - p
+
+/-- The text of the string whose opening quote is at `i` appended to `text`, and the index after its closing quote: `TapeBuf.strNodeI` without the tape. A string with no escape and no non-ASCII byte is one copy. -/
+@[inline] def strW (m : ByteArray) (a : ByteArray) (i : Nat) (text : ByteArray) : Option (ByteArray × Nat) :=
+  if byteIs a i 0x22 then
+    let r := skipF m a.size (i + 1)
+    if byteIs a r 0x22 && plainRun a (i + 1) r then some (a.copySlice (i + 1) text text.size (r - i - 1) false, r + 1)
+    else match strBytes a (i + 1) text with
+      | some (t, j) => if r == j - 1 then some (t, j) else none
+      | none => none
+  else none
+
+/-- The result bytes of a finished parse from the in-place tape and text: the three header words, the tape, the text (`finishW_eq`). -/
+def finishW (tape text : ByteArray) (tw : Nat) : ByteArray :=
+  let h := pushWordFast (pushWordFast (pushWordFast .empty 0) (UInt64.ofNat tw)) (UInt64.ofNat text.size)
+  let r := tape.copySlice 0 h 24 (8 * tw) false
+  text.copySlice 0 r r.size text.size false
+
+/-- `runI`, with the tape and the text written in place. -/
+def runW (m : ByteArray) : Nat → ByteArray → Nat → Bool → ByteArray → Nat → ByteArray → FStack → Nat → Option ByteArray
+  | 0, _, _, _, _, _, _, _, _ => none
+  | f + 1, a, i, false, tape, tw, text, fst, d =>
+    match byteAt a i with
+    | none => none
+    | some b =>
+      if b == 0x5B then
+        if d == 0 then none
+        else
+          let i1 := skipF m a.size (i + 1)
+          if byteIs a i1 0x5D then runW m f a (i1 + 1) true (putNode tape tw (hdrW 5 0) 2) (tw + 2) text fst d
+          else runW m f a i1 false (putNode tape tw (hdrW 5 0) 0) (tw + 2) text (.arr tw 0 fst) (d - 1)
+      else if b == 0x7B then
+        if d == 0 then none
+        else
+          let i1 := skipF m a.size (i + 1)
+          if byteIs a i1 0x7D then runW m f a (i1 + 1) true (putNode tape tw (hdrW 6 0) 2) (tw + 2) text fst d
+          else
+            let tape := putNode tape tw (hdrW 6 0) 0
+            let o := text.size
+            match strW m a i1 text with
+            | some (text', j) =>
+              let j1 := skipF m a.size j
+              if byteIs a j1 0x3A then
+                runW m f a (skipF m a.size (j1 + 1)) false (putNode tape (tw + 2) (hdrW 4 (text'.size - o)) (UInt64.ofNat o)) (tw + 4) text' (.obj tw 0 fst) (d - 1)
+              else none
+            | none => none
+      else if b == 0x22 then
+        let o := text.size
+        match strW m a i text with
+        | some (text', j) => runW m f a j true (putNode tape tw (hdrW 4 (text'.size - o)) (UInt64.ofNat o)) (tw + 2) text' fst d
+        | none => none
+      else if b == 0x6E then
+        match litA a (i + 1) [0x75, 0x6C, 0x6C] with
+        | some j => if delimAt a j then runW m f a j true (putNode tape tw (hdrW 0 0) 0) (tw + 2) text fst d else none
+        | none => none
+      else if b == 0x74 then
+        match litA a (i + 1) [0x72, 0x75, 0x65] with
+        | some j => if delimAt a j then runW m f a j true (putNode tape tw (hdrW 2 0) 0) (tw + 2) text fst d else none
+        | none => none
+      else if b == 0x66 then
+        match litA a (i + 1) [0x61, 0x6C, 0x73, 0x65] with
+        | some j => if delimAt a j then runW m f a j true (putNode tape tw (hdrW 1 0) 0) (tw + 2) text fst d else none
+        | none => none
+      else
+        match scanNum a i with
+        | some j =>
+          if delimAt a j then
+            let o := text.size
+            let text' := if lexRun a i j then a.copySlice i text o (j - i) false else pushLex a i j text
+            runW m f a j true (putNode tape tw (hdrW 3 (text'.size - o)) (UInt64.ofNat o)) (tw + 2) text' fst d
+          else none
+        | none => none
+  | _ + 1, a, i, true, tape, tw, text, .nil, _ => if a.size ≤ skipF m a.size i then some (finishW tape text tw) else none
+  | f + 1, a, i, true, tape, tw, text, .arr at_ n rest, d =>
+    let i1 := skipF m a.size i
+    if byteIs a i1 0x2C then runW m f a (skipF m a.size (i1 + 1)) false tape tw text (.arr at_ (n + 1) rest) d
+    else if byteIs a i1 0x5D then runW m f a (i1 + 1) true (st64 (st64 tape at_.toUSize (hdrW 5 (n + 1))) (at_ + 1).toUSize (UInt64.ofNat (tw - at_))) tw text rest (d + 1)
+    else none
+  | f + 1, a, i, true, tape, tw, text, .obj at_ n rest, d =>
+    let i1 := skipF m a.size i
+    if byteIs a i1 0x2C then
+      let o := text.size
+      match strW m a (skipF m a.size (i1 + 1)) text with
+      | some (text', j) =>
+        let j1 := skipF m a.size j
+        if byteIs a j1 0x3A then
+          runW m f a (skipF m a.size (j1 + 1)) false (putNode tape tw (hdrW 4 (text'.size - o)) (UInt64.ofNat o)) (tw + 2) text' (.obj at_ (n + 1) rest) d
+        else none
+      | none => none
+    else if byteIs a i1 0x7D then runW m f a (i1 + 1) true (st64 (st64 tape at_.toUSize (hdrW 6 (n + 1))) (at_ + 1).toUSize (UInt64.ofNat (tw - at_))) tw text rest (d + 1)
+    else none
+
+/-- Inputs of this many bytes (256 MiB) or more take the scalar parser (the offsets of the mask and the tape, at most four words per input byte, are then far below `USize` on every platform, 32 bits included). -/
+@[inline] def simdLimit : Nat := 268435456
+
+/-- The index-driven parser: the structural mask of the input (stage 1), then `runW`; on any decline, or an input of `simdLimit` or more, the scalar fused parser. The bytes are `parseTapeFast`'s (`parseTapeSimd_eq`, `LeanJsonProofs/ParseW.lean`). This is the export `vbm_json_parse_tape`: it lives in this module because the C edge initialises `LeanJsonSimd.ParseSimd` (`abi/vbm_json.c`), which initialises everything it imports. -/
+@[export vbm_json_parse_tape] def parseTapeSimd (a : ByteArray) : ByteArray :=
+  if a.size < simdLimit then
+    let m := stage1 a
+    match runW m (a.size + 2) a (skipI m a.size 0) false zeros4k 0 .empty .nil maxDepth with
+    | some t => t
+    | none => parseTapeFast a
+  else parseTapeFast a
+
+/-- The same with `runI`, the step between `runT` and `runW` (`parseTapeI_eq`, `LeanJsonProofs/ParseSimd.lean`): not run by any export. -/
+def parseTapeI (a : ByteArray) : ByteArray :=
   if a.size < simdLimit then
     let m := stage1 a
     match runI m (a.size + 2) a (skipI m a.size 0) false ⟨.empty, .empty⟩ .nil maxDepth with

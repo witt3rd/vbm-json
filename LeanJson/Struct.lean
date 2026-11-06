@@ -17,7 +17,7 @@ string is a syntax error that stage 2 sees as a scalar token and rejects; this i
 namespace LeanJson
 
 /-- `{ } [ ] : ,`. -/
-def isOp (c : UInt8) : Bool := c == 0x7B || c == 0x7D || c == 0x5B || c == 0x5D || c == 0x3A || c == 0x2C
+@[inline] def isOp (c : UInt8) : Bool := c == 0x7B || c == 0x7D || c == 0x5B || c == 0x5D || c == 0x3A || c == 0x2C
 
 /-- The machine's state before a byte. -/
 structure SState where
