@@ -31,8 +31,8 @@ echo "test_bindings: the committed bindings equal the regenerated ones; a tamper
 
 # 3. the library and the vectors
 scripts/build_shared.sh "$tmp/lib" >/dev/null
-lake build vbm-json-vectors >/dev/null
-lake exe vbm-json-vectors --n 4 --out "$tmp/v" >/dev/null
+[ -x .lake/build/bin/vbm-json-vectors ] && [ -f .lake/build/lib/libvbm_x2djson_LeanJson.a ] || lake build vbm-json-vectors >/dev/null   # tier1 builds these once; concurrent lake runs in one tree are avoided
+.lake/build/bin/vbm-json-vectors --n 4 --out "$tmp/v" >/dev/null
 v="$tmp/v/vectors.jsonl"
 export VBM_JSON_LIB="$tmp/lib/libvbm_json.so"
 py() { python3 tests/bindings/test_python.py "$1" "${2:-bindings/python}"; }

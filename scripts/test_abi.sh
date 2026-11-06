@@ -28,9 +28,9 @@ mkdir "$tmp/emptyinc"   # negative self-test of the preflight: no headers at all
 if (preflight "$tmp/emptyinc") 2>"$tmp/pre.err"; then echo "test_abi: self-test: the preflight accepted a tree with no libc headers" >&2; exit 1; fi
 grep -q 'libc6-dev' "$tmp/pre.err" || { echo "test_abi: self-test: the preflight failure did not name the package" >&2; exit 1; }; ran_case
 mapfile -t SYSFLAGS < <(sysinc_flags "${VBM_JSON_SYSINCLUDE:-/usr/include}")
-lake build LeanJson:static vbm-json-vectors >/dev/null
+[ -x .lake/build/bin/vbm-json-vectors ] && [ -f .lake/build/lib/libvbm_x2djson_LeanJson.a ] || lake build LeanJson:static vbm-json-vectors >/dev/null   # tier1 builds these once; concurrent lake runs in one tree are avoided
 lib=.lake/build/lib/libvbm_x2djson_LeanJson.a; [ -f "$lib" ] || { echo "test_abi: $lib was not built" >&2; exit 1; }
-lake exe vbm-json-vectors --n 4 --out "$tmp/v" >/dev/null
+.lake/build/bin/vbm-json-vectors --n 4 --out "$tmp/v" >/dev/null
 v="$tmp/v/vectors.jsonl"
 build() { leanc "${SYSFLAGS[@]}" -Wall -Wextra -Werror -I include -o "$1" tests/abi_test.c "$2" "$lib"; }   # build OUT SHIM.c
 build "$tmp/abi_test" abi/vbm_json.c

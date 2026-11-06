@@ -8,7 +8,7 @@
 set -euo pipefail
 here=$(cd "$(dirname "$0")/.." && pwd); cd "$here"
 out=${1:?usage: build_native.sh OUTDIR}; mkdir -p "$out"
-lake build LeanJson:static >/dev/null
+[ -f .lake/build/lib/libvbm_x2djson_LeanJson.a ] || lake build LeanJson:static >/dev/null
 tc=$(dirname "$(dirname "$(readlink -f "$(command -v lean)")")")
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 cf=(-ffreestanding -nostdlib -nostdlibinc -fno-stack-protector -fno-builtin -ffunction-sections -fdata-sections -O2 -fPIC -DNDEBUG -I"$here/runtime/include" -I"$tc/include")

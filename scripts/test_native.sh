@@ -22,7 +22,7 @@ mapfile -t SYSFLAGS < <(sysinc_flags "${VBM_JSON_SYSINCLUDE:-/usr/include}")
 jpids=(); bgj() { set -m; "$@" & jpids+=($!); set +m; }; reapj() { reap_pids "${jpids[@]}"; }; joinj() { local p; for p in "${jpids[@]}"; do wait "$p" || exit 1; done; jpids=(); }
 trap 'reapj; rm -rf "$tmp"' EXIT; trap 'exit 143' INT TERM HUP   # replaces the EXIT trap above: the same cleanup, plus the reaper
 changed() { cmp -s "$1" "$2" && { echo "test_native: self-test: the corruption of $3 changed nothing" >&2; exit 1; } || true; }
-lake build vbm-json-vectors LeanJson:static >/dev/null
+[ -x .lake/build/bin/vbm-json-vectors ] && [ -f .lake/build/lib/libvbm_x2djson_LeanJson.a ] || lake build vbm-json-vectors LeanJson:static >/dev/null   # tier1 builds these once; concurrent lake runs in one tree are avoided
 lib=.lake/build/lib/libvbm_x2djson_LeanJson.a
 # 1. the build and its symbols
 scripts/build_native.sh "$tmp/lib" > "$tmp/build.txt"; sed 's/^/test_native: /' "$tmp/build.txt"
@@ -41,7 +41,7 @@ printf 'int printf(const char *, ...);\nint vbm_x(void) { return printf("x"); }\
 must_fail "a file that calls printf" env VBM_EXTRA_C="$tmp/pf.c" VBM_KEEP=vbm_x scripts/build_native.sh "$tmp/neg2" --no-so
 grep -q 'printf' <<<"$MUST_FAIL_ERR" || { echo "test_native: self-test: the nm check did not name printf" >&2; exit 1; }
 # 2. the vectors against this library only
-lake exe vbm-json-vectors --n 4 --out "$tmp/v" >/dev/null
+.lake/build/bin/vbm-json-vectors --n 4 --out "$tmp/v" >/dev/null
 v="$tmp/v/vectors.jsonl"
 leanc "${SYSFLAGS[@]}" -Wall -Wextra -Werror -I include -o "$tmp/abi_test" tests/abi_test.c "$tmp/lib/libvbm_json.a"
 "$tmp/abi_test" "$v" | sed 's/^/test_native: /'; ran_case   # the positive run: the control of the negative self-tests

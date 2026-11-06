@@ -17,10 +17,10 @@ fi
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 sysinc_flags() { printf '%s\n' -isystem "$1"; [ ! -d "$1/$(uname -m)-linux-gnu" ] || printf '%s\n' -isystem "$1/$(uname -m)-linux-gnu"; }
 mapfile -t SYSFLAGS < <(sysinc_flags "${VBM_JSON_SYSINCLUDE:-/usr/include}")
-lake build LeanJson:static vbm-json-vectors >/dev/null
+[ -x .lake/build/bin/vbm-json-vectors ] && [ -f .lake/build/lib/libvbm_x2djson_LeanJson.a ] || lake build LeanJson:static vbm-json-vectors >/dev/null   # tier1 builds these once; concurrent lake runs in one tree are avoided
 lib=.lake/build/lib/libvbm_x2djson_LeanJson.a; [ -f "$lib" ] || { echo "test_wasm: $lib was not built" >&2; exit 1; }
 scripts/build_wasm.sh "$tmp/vbm.wasm"
-lake exe vbm-json-vectors --n 4 --out "$tmp/v" >/dev/null
+.lake/build/bin/vbm-json-vectors --n 4 --out "$tmp/v" >/dev/null
 v="$tmp/v/vectors.jsonl"
 run() { node tests/wasm/wasm_test.mjs "$1" "$2" "$tmp/w.$BASHPID.txt"; }   # each (concurrent) run has its own answer file; the main shell's is $tmp/w.$$.txt   # run WASM VECTORS
 run "$tmp/vbm.wasm" "$v"; ran_case   # the positive run: the control of the negative self-tests
