@@ -182,7 +182,7 @@ Entry format: **What** it is; **Enters** where it enters; **Assumes** what we as
 - **Test:** `scripts/tier1.sh` (the pin in `lakefile.lean`, the manifest and the checkout agree and the header is unedited; five negative self-tests) and `scripts/tier1.sh` (only `LeanJsonSimd/` imports the dependency, and never its proofs); the shims' differential test and mutants run in vbm-simd's own Tier 1; the shared vectors of this repository run through the shims on every Tier 1 (the export is the bit-parallel parser).
 - **Owner:** the owner (`lakefile.lean` and `lake-manifest.json` are in the protected set); vbm-simd is the same owner's repository.
 - **Plan:** verify, in part: the Lean side is proved against its models; the header is the small, exhaustively-exercised part that stays trusted. The pin changes only through the protected path, one reviewed commit at a time.
-- **Covers:** `file:lake-manifest.json` `dep:vbm-simd/include/vbm_simd.h` `extern:vbm_simd_ld64` `extern:vbm_simd_st64` `extern:vbm_simd_st32` `extern:vbm_simd_ctz`
+- **Covers:** `file:lake-manifest.json` `dep:vbm-simd/include/vbm_simd.h` `extern:vbm_simd_ld64` `extern:vbm_simd_st64` `extern:vbm_simd_st32` `extern:vbm_simd_ctz` `module:VbmSimd.Shims`
 
 ## Planned (not in the tree yet; promoted to a numbered entry, with a derived key, in the PR that adds the file)
 
