@@ -209,6 +209,16 @@ def strBytesW (a : ByteArray) (i : Nat) (b : ByteArray) : Option (ByteArray × N
 termination_by a.size - i
 decreasing_by all_goals omega
 
+/-- `0x80` in every lane of `w` that is `E` or `+` (`lexBad_lane`). -/
+@[inline] def lexBad (w : UInt64) : UInt64 := eqLanes 0x4545454545454545 w ||| eqLanes 0x2b2b2b2b2b2b2b2b w
+
+/-- `lexRun`, eight bytes at a time; the last, partial word has its lanes past `e` cleared (`lexOk_eq`). -/
+def lexOk (a : ByteArray) (p e : Nat) : Bool :=
+  if h : p + 8 ≤ e then (if lexBad (ld64 a p.toUSize) == 0 then lexOk a (p + 8) e else false)
+  else if p < e then (lexBad (ld64 a p.toUSize) &&& (((1 : UInt64) <<< (8 * (e - p).toUInt64)) - 1)) == 0
+  else true
+termination_by e - p
+
 /-- The text of the string whose opening quote is at `i` appended to `text`, and the index after its closing quote: `TapeBuf.strNodeI` without the tape. A string with no escape and no non-ASCII byte is one copy. -/
 @[inline] def strW (m : ByteArray) (a : ByteArray) (i : Nat) (text : ByteArray) : Option (ByteArray × Nat) :=
   if byteIs a i 0x22 then
@@ -275,7 +285,7 @@ def runW (m : ByteArray) : Nat → ByteArray → Nat → Bool → ByteArray → 
         | some j =>
           if delimAt a j then
             let o := text.size
-            let text' := if lexRun a i j then a.copySlice i text o (j - i) false else pushLex a i j text
+            let text' := if lexOk a i j then a.copySlice i text o (j - i) false else pushLex a i j text
             runW m f a j true (putNode tape tw (hdrW 3 (text'.size - o)) (UInt64.ofNat o)) (tw + 2) text' fst d
           else none
         | none => none

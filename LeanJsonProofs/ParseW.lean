@@ -395,8 +395,9 @@ theorem pushLex_plain (a : ByteArray) : ∀ d p e b, e - p = d → p ≤ e → l
       · simp [hc] at hrun
     · simp [hps] at hrun
 
-theorem numText_eq (a : ByteArray) (i j : Nat) (hij : i ≤ j) (text : ByteArray) :
-    (if lexRun a i j then a.copySlice i text text.size (j - i) false else pushLex a i j text) = pushLex a i j text := by
+theorem numText_eq (a : ByteArray) (hs : a.size < 2 ^ 31) (i j : Nat) (hij : i ≤ j) (hj : j ≤ a.size) (text : ByteArray) :
+    (if lexOk a i j then a.copySlice i text text.size (j - i) false else pushLex a i j text) = pushLex a i j text := by
+  rw [lexOk_eq a hs j hj i]
   by_cases h : lexRun a i j = true
   · simp only [h, ↓reduceIte]
     rw [copy_append, pushLex_plain a _ i j text rfl hij h, show i + (j - i) = j by omega]
@@ -552,7 +553,7 @@ theorem runW_sound (a : ByteArray) (hsz : a.size < 2 ^ 31) : ∀ f i ret tape tw
                       simp only [hn] at h ⊢
                       by_cases hdl : delimAt a k = true
                       · simp only [hdl, ↓reduceIte] at h ⊢
-                        rw [numText_eq a i k (Nat.le_of_lt (scanNum_adv a i k hn)) text] at h
+                        rw [numText_eq a hsz i k (Nat.le_of_lt (scanNum_adv a i k hn)) ((scanNum_run a i k hn).2.1 (Nat.le_of_lt (byteAt_spec a i b hbyte).1)) text] at h
                         have hnl : tb.numLex a i k = ⟨pushWordFast (pushWordFast tb.tape (UInt64.ofNat (kindNum + ((pushLex a i k text).size - tb.text.size) * 256))) (UInt64.ofNat tb.text.size), pushLex a i k text⟩ := by
                           obtain ⟨tape0, text0⟩ := tb
                           have := hr.tx

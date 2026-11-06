@@ -1,5 +1,5 @@
 # unverified definitions reachable from the entry points, per module (scripts/ClosureGate.lean); may only fall
-LeanJsonSimd.ParseSimd 39
+LeanJsonSimd.ParseSimd 40
 LeanJsonSimd.Stage1 18
 VbmSimd.Shims 7
 VbmSimd.Cursor 6
@@ -8,5 +8,5 @@ VbmSimd.Bytes 5
 VbmSimd.Escape 4
 VbmSimd.PrefixXor 2
 VbmSimd.Spec 1
-mass 15162
-specified_share 23801 38994
+mass 15245
+specified_share 23801 39077

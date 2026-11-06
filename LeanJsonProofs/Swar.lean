@@ -404,4 +404,152 @@ theorem plainOff_run (a : ByteArray) (hs : a.size < 2 ^ 31) : ∀ d p, a.size - 
       rw [plainRun]
       simp
 
+
+/-! ## The lexeme without `E` or `+` -/
+
+theorem u8_c45 (j : Nat) (hj : j < 8) : u8 0x4545454545454545 j = 0x45 := by
+  have : ∀ j : Fin 8, u8 0x4545454545454545 j = 0x45 := by decide
+  exact this ⟨j, hj⟩
+theorem u8_c2b (j : Nat) (hj : j < 8) : u8 0x2b2b2b2b2b2b2b2b j = 0x2b := by
+  have : ∀ j : Fin 8, u8 0x2b2b2b2b2b2b2b2b j = 0x2b := by decide
+  exact this ⟨j, hj⟩
+
+theorem lexBad_lane (w : UInt64) (k : Nat) (hk : k < 8) : u8 (lexBad w) k = if (u8 w k == 0x45 || u8 w k == 0x2b) = true then 0x80 else 0 := by
+  unfold lexBad
+  rw [u8_or, u8_eqLanes _ _ _ hk, u8_eqLanes _ _ _ hk, u8_c45 k hk, u8_c2b k hk]
+  have : ∀ x : UInt8, ((if (x == 0x45) = true then (0x80 : UInt8) else 0) ||| (if (x == 0x2b) = true then 0x80 else 0)) = if (x == 0x45 || x == 0x2b) = true then 0x80 else 0 :=
+    u8_forall _ (by decide)
+  exact this _
+
+theorem eq_zero_of_u8 (x : UInt64) (h : ∀ k, k < 8 → u8 x k = 0) : x = 0 := by
+  apply ext_bits
+  intro i hi
+  have := u8_bit x (i / 8) (i % 8) (by omega)
+  rw [show 8 * (i / 8) + i % 8 = i by omega, h (i / 8) (by omega)] at this
+  rw [← this]
+  simp [bit]
+
+theorem u8_lowMask (n : Nat) (hn : n < 8) (k : Nat) (hk : k < 8) : u8 (((1 : UInt64) <<< (8 * n.toUInt64)) - 1) k = if k < n then 0xff else 0 := by
+  have : ∀ n : Fin 8, ∀ k : Fin 8, u8 (((1 : UInt64) <<< (8 * n.val.toUInt64)) - 1) k = if k.val < n.val then 0xff else 0 := by decide
+  exact this ⟨n, hn⟩ ⟨k, hk⟩
+
+theorem lexRun_iff (a : ByteArray) : ∀ d p e, e - p = d → (lexRun a p e = true ↔ ∀ q, p ≤ q → q < e → ∃ h : q < a.size, (a[q] != 0x45 && a[q] != 0x2B) = true) := by
+  intro d
+  induction d with
+  | zero =>
+    intro p e hd
+    rw [lexRun]
+    simp only [show ¬ p < e by omega, ↓reduceDIte, true_iff]
+    intro q h1 h2; omega
+  | succ d ih =>
+    intro p e hd
+    have hlt : p < e := by omega
+    rw [lexRun]
+    simp only [hlt, ↓reduceDIte]
+    by_cases hps : p < a.size
+    · simp only [hps, ↓reduceDIte]
+      by_cases hc : (a[p] != 0x45 && a[p] != 0x2B) = true
+      · simp only [hc, ↓reduceIte]
+        rw [ih (p + 1) e (by omega)]
+        constructor
+        · intro hh q hq1 hq2
+          by_cases hqp : q = p
+          · subst hqp; exact ⟨hps, hc⟩
+          · exact hh q (by omega) hq2
+        · intro hh q hq1 hq2
+          exact hh q (by omega) hq2
+      · simp only [hc, Bool.false_eq_true, ↓reduceIte, false_iff]
+        intro hh
+        obtain ⟨_, h2⟩ := hh p (Nat.le_refl _) hlt
+        exact hc h2
+    · simp only [hps, ↓reduceDIte, Bool.false_eq_true, false_iff]
+      intro hh
+      obtain ⟨h1, _⟩ := hh p (Nat.le_refl _) hlt
+      exact hps h1
+
+theorem lexOk_iff (a : ByteArray) (hs : a.size < 2 ^ 31) (e : Nat) (he : e ≤ a.size) : ∀ d p, e - p = d → (lexOk a p e = true ↔ lexRun a p e = true) := by
+  intro d
+  induction d using Nat.strongRecOn with
+  | _ d ih =>
+    intro p hd
+    rw [lexOk]
+    by_cases h8 : p + 8 ≤ e
+    · simp only [h8, ↓reduceDIte]
+      have hl := lexBad_lane (ld64 a p.toUSize)
+      have hbyte : ∀ k (hk : k < 8), u8 (ld64 a p.toUSize) k = a[p + k]'(by omega) := fun k hk => u8_ld64 a p (by omega) hs k hk
+      by_cases hz : (lexBad (ld64 a p.toUSize) == 0) = true
+      · simp only [hz, ↓reduceIte]
+        have hf0 : lexBad (ld64 a p.toUSize) = 0 := by simpa using hz
+        rw [ih (e - (p + 8)) (by omega) (p + 8) rfl, lexRun_iff a _ _ _ rfl, lexRun_iff a _ _ _ rfl]
+        constructor
+        · intro hh q hq1 hq2
+          by_cases hq : q < p + 8
+          · have := hl (q - p) (by omega)
+            rw [hf0, u8_zero, hbyte _ (by omega)] at this
+            refine ⟨by omega, ?_⟩
+            have h2 : (a[p + (q - p)]'(by omega) == 0x45 || a[p + (q - p)]'(by omega) == 0x2b) = false := by
+              by_cases hh2 : (a[p + (q - p)]'(by omega) == 0x45 || a[p + (q - p)]'(by omega) == 0x2b) = true
+              · simp [hh2] at this
+              · simpa using hh2
+            simp only [Bool.or_eq_false_iff, beq_eq_false_iff_ne] at h2
+            simp only [show p + (q - p) = q by omega] at h2
+            simp [h2.1, h2.2]
+          · exact hh q (by omega) hq2
+        · intro hh q hq1 hq2
+          exact hh q (by omega) hq2
+      · simp only [hz, Bool.false_eq_true, ↓reduceIte, false_iff]
+        have hnz : lexBad (ld64 a p.toUSize) ≠ 0 := by simpa using hz
+        rw [lexRun_iff a _ _ _ rfl]
+        intro hh
+        apply hnz
+        apply eq_zero_of_u8
+        intro k hk
+        rw [hl k hk, hbyte k hk]
+        obtain ⟨h1, h2⟩ := hh (p + k) (by omega) (by omega)
+        simp only [Bool.and_eq_true, bne_iff_ne, ne_eq] at h2
+        have h3 : (a[p + k]'(by omega) == 0x45 || a[p + k]'(by omega) == 0x2b) = false := by
+          simp [h2.1, h2.2]
+        simp [h3]
+    · simp only [h8, ↓reduceDIte]
+      by_cases hpe : p < e
+      · simp only [hpe, ↓reduceIte]
+        rw [lexRun_iff a _ _ _ rfl]
+        have hl := lexBad_lane (ld64 a p.toUSize)
+        have hbyte : ∀ k (hk : k < e - p), u8 (ld64 a p.toUSize) k = a[p + k]'(by omega) := fun k hk => by
+          rw [ld64_toUSize a p (by omega), u8_ld64Model a p k (by omega), byteAt0_lt a _ (by omega)]
+        constructor
+        · intro hz q hq1 hq2
+          have hz' : lexBad (ld64 a p.toUSize) &&& (((1 : UInt64) <<< (8 * (e - p).toUInt64)) - 1) = 0 := by simpa using hz
+          have := congrArg (fun x => u8 x (q - p)) hz'
+          simp only [u8_and, u8_zero, u8_lowMask (e - p) (by omega) (q - p) (by omega), hl (q - p) (by omega), hbyte (q - p) (by omega)] at this
+          refine ⟨by omega, ?_⟩
+          simp only [show p + (q - p) = q by omega, show q - p < e - p by omega, ↓reduceIte] at this
+          have h3 : (a[q]'(by omega) == 0x45 || a[q]'(by omega) == 0x2b) = false := by
+            by_cases hh3 : (a[q]'(by omega) == 0x45 || a[q]'(by omega) == 0x2b) = true
+            · simp only [hh3, ↓reduceIte] at this
+              exact absurd this (by decide)
+            · simpa using hh3
+          simp only [Bool.or_eq_false_iff, beq_eq_false_iff_ne] at h3
+          simp [h3.1, h3.2]
+        · intro hh
+          have : lexBad (ld64 a p.toUSize) &&& (((1 : UInt64) <<< (8 * (e - p).toUInt64)) - 1) = 0 := by
+            apply eq_zero_of_u8
+            intro k hk
+            rw [u8_and, u8_lowMask (e - p) (by omega) k hk]
+            by_cases hke : k < e - p
+            · simp only [hke, ↓reduceIte, hl k hk, hbyte k hke]
+              obtain ⟨h1, h2⟩ := hh (p + k) (by omega) (by omega)
+              simp only [Bool.and_eq_true, bne_iff_ne, ne_eq] at h2
+              have h3 : (a[p + k]'(by omega) == 0x45 || a[p + k]'(by omega) == 0x2b) = false := by simp [h2.1, h2.2]
+              simp [h3]
+            · simp [hke]
+          simp [this]
+      · simp only [hpe, ↓reduceIte]
+        rw [lexRun]
+        simp [hpe]
+
+theorem lexOk_eq (a : ByteArray) (hs : a.size < 2 ^ 31) (e : Nat) (he : e ≤ a.size) (p : Nat) : lexOk a p e = lexRun a p e := by
+  rw [Bool.eq_iff_iff]
+  exact lexOk_iff a hs e he _ p rfl
+
 end LeanJsonProofs

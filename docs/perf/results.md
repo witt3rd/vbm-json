@@ -115,3 +115,20 @@ Through the C ABI, as slice 4 (the harness is `docs/perf/prof.c`; A, B, C built 
 Through the Lean entry point (no shim copies, same machine, load 1.5) the same change measured 1.12 / 1.07 / 1.08 / 1.03 / 1.33 / 1.01: the gain is where the bytes are (string-heavy, canada), and twitter, whose strings are short and mostly non-ASCII, is flat within the noise. Measured and not landed: marking `scanNum` `@[inline]` (the `Option Nat` it returns allocates; removing the allocation was within the noise).
 
 (One thing the slice taught: `plainOff` first added its eight with a non-tail call (`8 + plainOff ...`), which is a stack frame per eight bytes; the WebAssembly test (row 43667 of the `bignum` set, a 100000-digit object key) trapped on the 1 MiB stack. The accumulator form is a loop. The native build has a larger stack and passed: the class is **a recursion that is not a loop** in emitted code, and Lean does not warn; `scanDigitsW`, `strBytesW`, `plainRun`, `lexRun`, `runW` are all tail calls.)
+
+## Slice 6 (S10b): the number lexeme is checked for `E` and `+` eight bytes at a time (`lexOk`)
+
+After slice 5 the sampler (`docs/perf/prof.c sample`, `resolve.py`) shows `lexRun`, the byte-at-a-time check that a number's lexeme has no `E` and no `+` (so that it can be copied from the input in one `copySlice`), at 8.2% of the scorecard corpus and 16.5% of canada. `lexOk` tests eight bytes at a time (`lexBad`: two `eqLanes`), the last partial word with its lanes past the end of the lexeme cleared (`(1 <<< 8n) - 1`); `lexOk_eq : lexOk a p e = lexRun a p e` for `e ≤ a.size` (`LeanJsonProofs/Swar.lean`: the lane statement, "a word is zero when its lanes are", the mask's lanes, then the same characterisation as for `plainRun`).
+
+Through the C ABI as before (A = slice 5, B = this slice; best of 3 windows of 2 s; local, host x, load 2.0 before and 1.8 after, about 5% noise):
+
+| corpus | bytes | MB/s A (slice 5) | MB/s B (`lexOk`) | B / A |
+|---|---|---|---|---|
+| canada | 2251051 | 247.2 | 286.3 | 1.16 |
+| citm_catalog | 1727204 | 516.0 | 516.7 | 1.00 |
+| scorecard corpus | 1033424 | 218.7 | 236.5 | 1.08 |
+| small-objects | 2412355 | 134.4 | 130.7 | 0.97 |
+| string-heavy | 2915939 | 368.9 | 354.6 | 0.96 |
+| twitter | 631515 | 252.0 | 260.8 | 1.04 |
+
+The three corpora with few numbers (citm_catalog, string-heavy, small-objects) do not run the changed code to a measurable degree; their differences are the noise of the machine (the Lean entry point, no shim, shows 0.97 to 1.01 on them).
