@@ -44,6 +44,7 @@ git clone -q "$T/remote.git" "$T/work" 2>/dev/null; cd "$T/work"; git config cor
 git clone -q "$T/remote.git" "$T/other" 2>/dev/null; git -C "$T/other" config core.hooksPath /dev/null
 # the scratch repository: this repository's REAL landing files, and stand-ins for the gates the hooks call
 mkdir -p scripts; cp -a "$src/scripts/land" "$src/scripts/land-direct" "$src/scripts/land.conf" "$src/scripts/land.d" scripts/; cp -a "$src/.agents" .
+sed -i '/^LAND_PROTECTED_LIST=/d' scripts/land.conf   # the lander-mechanics fixture has stand-in gates and no protected-paths list of its own: the list rule is judged on the real repository, not here
 sed -i 's/^LAND_STEP_TIMEOUT=.*/LAND_STEP_TIMEOUT=120/' scripts/land.conf
 cat > scripts/tier1.sh <<'SH'
 test ! -e BAD || { echo "BAD exists" >&2; exit 1; }
