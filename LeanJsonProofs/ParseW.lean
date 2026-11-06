@@ -1,5 +1,6 @@
 import LeanJsonSimd.ParseSimd
 import LeanJsonProofs.ParseSimd
+import LeanJsonProofs.Swar
 /-! # Proof: `runW` (the tape written in place) answers only what `runI` answers (`runW_sound`)
 
 `LeanJsonSimd/ParseSimd.lean`, `runW`. `runI` carries the tape and the text region in a `TapeBuf`; `runW` carries `tape` (a byte array at least `8 * tw` long: the first `8 * tw` bytes are the tape, the rest is zero-filled room),
@@ -9,35 +10,6 @@ namespace LeanJsonProofs
 open LeanJson VbmSimd VbmSimdProofs
 
 /-! ## Bytes -/
-
-theorem byteAt0_push (b : ByteArray) (v : UInt8) (n : Nat) : byteAt0 (b.push v) n = if n < b.size then byteAt0 b n else if n = b.size then v else 0 := by
-  unfold byteAt0
-  show (b.data.push v).getD n 0 = _
-  have hs : b.size = b.data.size := rfl
-  rw [Array.getD_eq_getD_getElem?, Array.getElem?_push, Array.getD_eq_getD_getElem?, hs]
-  by_cases h1 : n < b.data.size
-  · have h3 : n ≠ b.data.size := by omega
-    simp only [h1, h3, ↓reduceIte]
-  · by_cases h3 : n = b.data.size
-    · subst h3
-      simp only [Nat.lt_irrefl, ↓reduceIte]; rfl
-    · simp only [h1, h3, ↓reduceIte]
-      rw [Array.getElem?_eq_none (by omega)]; rfl
-
-theorem byteAt0_ge (a : ByteArray) (n : Nat) (h : a.size ≤ n) : byteAt0 a n = 0 := by
-  unfold byteAt0
-  rw [Array.getD_eq_getD_getElem?, Array.getElem?_eq_none (by exact h)]; rfl
-
-theorem byteAt0_lt (a : ByteArray) (n : Nat) (h : n < a.size) : byteAt0 a n = a[n] := by
-  unfold byteAt0
-  show a.data.getD n 0 = a.data[n]
-  rw [Array.getD_eq_getD_getElem?, Array.getElem?_eq_getElem h]; rfl
-
-theorem ext_byteAt0 (a b : ByteArray) (hs : a.size = b.size) (h : ∀ n, byteAt0 a n = byteAt0 b n) : a = b := by
-  apply ByteArray.ext_getElem hs
-  intro i hi hi'
-  have := h i
-  rwa [byteAt0_lt a i hi, byteAt0_lt b i hi'] at this
 
 /-- `pushWord` writes byte `j` of the word at `b.size + j`. -/
 theorem byteAt0_pushWord (b : ByteArray) (w : UInt64) (n : Nat) :
@@ -314,6 +286,51 @@ theorem strBytes_quote (a : ByteArray) (r : Nat) (b : ByteArray) (h : byteIs a r
   have : a[r] = 0x22 := by rw [← byteD_eq a r hr]; exact hb
   simp [hr, this]
 
+/-- `strBytes` with the plain runs copied at once is `strBytes`. -/
+theorem strBytesW_eq (a : ByteArray) (hs : a.size < 2 ^ 31) : ∀ d i b, a.size - i = d → strBytesW a i b = strBytes a i b := by
+  intro d
+  induction d using Nat.strongRecOn with
+  | _ d ih =>
+    intro i b hd
+    have hrun := plainOff_run a hs _ i rfl
+    have hpl : strBytes a i b = strBytes a (i + plainOff a i 0) (b ++ a.extract i (i + plainOff a i 0)) :=
+      strBytes_plain a _ i _ b rfl (by omega) hrun
+    have hcp : a.copySlice i b b.size (i + plainOff a i 0 - i) false = b ++ a.extract i (i + plainOff a i 0) := by
+      rw [copy_append, show i + (i + plainOff a i 0 - i) = i + plainOff a i 0 by omega]
+    rw [strBytesW, hpl]
+    simp only [hcp]
+    generalize b ++ a.extract i (i + plainOff a i 0) = b'
+    generalize hp : i + plainOff a i 0 = p
+    have hip : i ≤ p := by omega
+    by_cases hpa : p < a.size
+    · simp only [hpa, ↓reduceDIte]
+      rw [strBytes]
+      simp only [hpa, ↓reduceDIte]
+      by_cases hq : (a[p] == 0x22) = true
+      · simp only [hq, ↓reduceIte]
+      · simp only [hq, Bool.false_eq_true, ↓reduceIte]
+        by_cases hpl2 : plainAscii a[p] = true
+        · simp only [hpl2, ↓reduceIte]
+          exact ih (a.size - (p + 1)) (by omega) (p + 1) _ rfl
+        · simp only [hpl2, Bool.false_eq_true, ↓reduceIte]
+          cases hdc : decodeCharA a p with
+          | none => rfl
+          | some nj =>
+            obtain ⟨n, j⟩ := nj
+            simp only []
+            by_cases hpj : p < j
+            · simp only [hpj, ↓reduceIte]
+              exact ih (a.size - j) (by omega) j _ rfl
+            · simp only [hpj, ↓reduceIte]
+    · simp only [hpa, ↓reduceDIte]
+      rw [strBytes]
+      simp [hpa]
+
+theorem scanNumW_eq (a : ByteArray) (hs : a.size < 2 ^ 31) (i : Nat) : scanNumW a i = scanNum a i := by
+  have e : ∀ j, scanDigitsW a j = scanDigits a j := fun j => scanDigitsW_eq a hs _ j rfl
+  simp only [scanNumW, scanIntW, scanFracW, scanExpW, scanDigits1W, scanNum, scanInt, scanFrac, scanExp, scanDigits1, e]
+  rfl
+
 /-- The string leaf of `runW`: when it answers, `strBytes` answers the same, and the string ends at the first structural position after its opening quote. -/
 theorem strW_sound (a : ByteArray) (hsz : a.size < 2 ^ 31) (i : Nat) (text text' : ByteArray) (j : Nat)
     (h : strW (stage1 a) a i text = some (text', j)) :
@@ -325,15 +342,17 @@ theorem strW_sound (a : ByteArray) (hsz : a.size < 2 ^ 31) (i : Nat) (text text'
     obtain ⟨hi, _⟩ := byteIs_spec a i _ hq
     have hfs := skipI_spec a hsz (i + 1) (by omega)
     have hr1 : i + 1 ≤ skipI (stage1 a) a.size (i + 1) := hfs.1
-    by_cases hf : (byteIs a (skipI (stage1 a) a.size (i + 1)) 0x22 && plainRun a (i + 1) (skipI (stage1 a) a.size (i + 1))) = true
+    by_cases hf : (i + 1 + plainOff a (i + 1) 0 == skipI (stage1 a) a.size (i + 1) && byteIs a (skipI (stage1 a) a.size (i + 1)) 0x22) = true
     · simp only [hf, ↓reduceIte, Option.some.injEq, Prod.mk.injEq] at h
       obtain ⟨ht, hj⟩ := h
       subst ht hj
-      simp only [Bool.and_eq_true] at hf
-      rw [strBytes_plain a _ (i + 1) _ text rfl hr1 hf.2, strBytes_quote a _ _ hf.1, copy_append]
+      simp only [Bool.and_eq_true, beq_iff_eq] at hf
+      have hrun : plainRun a (i + 1) (skipI (stage1 a) a.size (i + 1)) = true := by
+        rw [← hf.1]; exact plainOff_run a hsz _ (i + 1) rfl
+      rw [strBytes_plain a _ (i + 1) _ text rfl hr1 hrun, strBytes_quote a _ _ hf.2, copy_append]
       refine ⟨?_, by omega⟩
       rw [show i + 1 + (skipI (stage1 a) a.size (i + 1) - i - 1) = skipI (stage1 a) a.size (i + 1) by omega]
-    · simp only [hf, Bool.false_eq_true, ↓reduceIte] at h
+    · simp only [hf, Bool.false_eq_true, ↓reduceIte, strBytesW_eq a hsz _ _ _ rfl] at h
       cases hb : strBytes a (i + 1) text with
       | none => simp [hb] at h
       | some tj =>
@@ -526,7 +545,7 @@ theorem runW_sound (a : ByteArray) (hsz : a.size < 2 ^ 31) : ∀ f i ret tape tw
                       · simp only [hdl, ↓reduceIte] at h ⊢
                         exact ih _ true _ _ _ _ _ _ t (by omega) (Rel_node hr (by omega) kindFalse 1 rfl 0 0) (hf.mono (by omega)) h
                       · simp [hdl] at h
-                  · simp only [h66, Bool.false_eq_true, ↓reduceIte] at h ⊢
+                  · simp only [h66, Bool.false_eq_true, ↓reduceIte, scanNumW_eq a hsz] at h ⊢
                     cases hn : scanNum a i with
                     | none => simp [hn] at h
                     | some k =>

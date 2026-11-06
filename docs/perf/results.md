@@ -96,3 +96,22 @@ Measured end to end through the C ABI (`docs/perf/bench.sh`'s harness `prof.c`, 
 The comparators on the same host, in the same hour (the prebuilt `serde_json` `Value` and `simdjson` DOM of the scorecard, `comp/run.sh`): serde_json 320.8 / 644.8 / 164.8 / 87.6 / 317.8 / 348.1 and simdjson 1422.2 / 4946.4 / 1437.3 / 1383.1 / 3006.7 / 4096.1 on the same six rows in the same order. The scorecard corpus is at 1.20x of serde_json (it was 0.81x). Stage 1 alone runs at 1.1 to 1.4 GB/s here (`stage1` mode of the scratch harness), 15 to 22% of the time of the parse; the rest of the time is the loop.
 
 What is left (the slices after this one): string-heavy is flat because every string with an escape or a non-ASCII byte takes the byte-at-a-time `strBytes`; the digit run of a number is scanned a byte at a time and the scan allocates its `Option`; the literals are matched by `litA` over a list; each open container allocates an `FStack` cell; the result is copied twice more at the end (`finishW`, then the shim).
+
+## Slice 5 (S10a): word-parallel leaves: the plain run of a string and the digit run of a number
+
+`plainOff` finds the end of a run of plain string bytes eight at a time (`ld64`, the byte-lane test `plainBad`, `ctz` of the first flagged lane) and `strBytesW` copies the run with one `copySlice`, then handles the one byte that stopped it (a quote, a backslash, a non-ASCII byte) as `strBytes` does and continues. `scanDigitsW` does the same for the digits of a number (`ndFlags`), so a number is scanned in one or two words and `scanNumW` (`scanNum` with it) does not call a byte loop. Every addition in the two lane tests is carry-free (a masked operand and a constant below `0x80`), so each lane is a function of its own byte; the proof (`LeanJsonProofs/Swar.lean`) shows that for the three byte-wise operations and for `+` under the no-carry condition (`ln_add`: the sum of two numbers whose base-256 digits add without carry has the sums as digits), then the lane statements are 256 cases each, and `first_flag` ties `ctz` to the first flagged lane. `strBytesW_eq`, `scanDigitsW_eq` and `scanNumW_eq` are the equations against the leaves they replace; `parseTapeSimd_eq` and `runW_sound` are unchanged in statement.
+
+Through the C ABI, as slice 4 (the harness is `docs/perf/prof.c`; A, B, C built from three trees and run alternately, best of 3 windows of 2 s per cell). **Local, host x, load 2.4 before and after (above 2: reported, not waited for), about 5 to 10% noise.** A = the scalar export (slice 3), B = slice 4, C = this slice:
+
+| corpus | bytes | A scalar `parseTapeFast` | B `runW` (slice 4) | C word-parallel leaves | C / B |
+|---|---|---|---|---|---|
+| canada | 2251051 | 149.8 | 183.5 | 209.5 | 1.14 |
+| citm_catalog | 1727204 | 269.4 | 474.3 | 510.3 | 1.08 |
+| scorecard corpus | 1033424 | 126.7 | 197.0 | 215.3 | 1.09 |
+| small-objects | 2412355 | 81.2 | 124.5 | 126.7 | 1.02 |
+| string-heavy | 2915939 | 269.1 | 258.6 | 317.8 | 1.23 |
+| twitter | 631515 | 211.0 | 256.9 | 250.0 | 0.97 |
+
+Through the Lean entry point (no shim copies, same machine, load 1.5) the same change measured 1.12 / 1.07 / 1.08 / 1.03 / 1.33 / 1.01: the gain is where the bytes are (string-heavy, canada), and twitter, whose strings are short and mostly non-ASCII, is flat within the noise. Measured and not landed: marking `scanNum` `@[inline]` (the `Option Nat` it returns allocates; removing the allocation was within the noise).
+
+(One thing the slice taught: `plainOff` first added its eight with a non-tail call (`8 + plainOff ...`), which is a stack frame per eight bytes; the WebAssembly test (row 43667 of the `bignum` set, a 100000-digit object key) trapped on the 1 MiB stack. The accumulator form is a loop. The native build has a larger stack and passed: the class is **a recursion that is not a loop** in emitted code, and Lean does not warn; `scanDigitsW`, `strBytesW`, `plainRun`, `lexRun`, `runW` are all tail calls.)

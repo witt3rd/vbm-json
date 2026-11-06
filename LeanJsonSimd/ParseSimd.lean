@@ -132,12 +132,89 @@ def lexRun (a : ByteArray) (p e : Nat) : Bool :=
   if h : p < e then (if h2 : p < a.size then (if a[p] != 0x45 && a[p] != 0x2B then lexRun a (p + 1) e else false) else false) else true
 termination_by e - p
 
+/-! ## Word-parallel leaves
+
+Eight bytes of the input are tested at once (`ld64`, then `SWAR` byte-lane tests whose every addition is carry-free: no lane's sum reaches 256, so the lanes do not interact: `LeanJsonProofs/Swar.lean`). `plainBad` flags (`0x80` in the lane) the bytes of a string
+that are not plain: below `0x20`, `0x80` or above, `\`, `"`. `ndFlags` flags the bytes that are not an ASCII digit. The first flagged lane is found by `ctz`. Only whole words inside the input are read; the last
+(at most seven) bytes of a document are done a byte at a time by the leaf these replace (`plainOff_run`, `scanDigitsW_eq`). -/
+
+@[inline] def cHi : UInt64 := 0x8080808080808080
+@[inline] def cLo7 : UInt64 := 0x7f7f7f7f7f7f7f7f
+
+/-- `0x80` in every lane of `w` that is not a plain string byte (`plainBad_lane`). -/
+@[inline] def plainBad (w : UInt64) : UInt64 :=
+  ((~~~((w &&& cLo7) + 0x6060606060606060) ||| w) &&& cHi) ||| eqLanes cBslash w ||| eqLanes cQuote w
+
+/-- The number of bytes at `p` that are plain (below the first flagged lane), by whole words while eight bytes remain, added to `acc` (a tail call: a string of a hundred thousand bytes is a loop, not a stack: `plainOff_acc`). -/
+def plainOff (a : ByteArray) (p acc : Nat) : Nat :=
+  if h : p + 8 ≤ a.size then
+    let f := plainBad (ld64 a p.toUSize)
+    if f == 0 then plainOff a (p + 8) (acc + 8) else acc + (ctz f).toNat / 8
+  else acc
+termination_by a.size - p
+
+/-- `0x80` in every lane of `w` that is not an ASCII digit (`ndFlags_lane`). -/
+@[inline] def ndFlags (w : UInt64) : UInt64 :=
+  let x := w ^^^ 0x3030303030303030
+  (((x &&& cLo7) + 0x7676767676767676) ||| x) &&& cHi
+
+/-- `scanDigits` by whole words: the index after the digits at `i`. -/
+def scanDigitsW (a : ByteArray) (i : Nat) : Nat :=
+  if h : i + 8 ≤ a.size then
+    let f := ndFlags (ld64 a i.toUSize)
+    if f == 0 then scanDigitsW a (i + 8) else i + (ctz f).toNat / 8
+  else scanDigits a i
+termination_by a.size - i
+
+/-- `scanDigits1`, with `scanDigitsW`. -/
+@[inline] def scanDigits1W (a : ByteArray) (i : Nat) : Option Nat :=
+  match byteAt a i with
+  | some b => if (digitVal b).isSome then some (scanDigitsW a (i + 1)) else none
+  | none => none
+
+/-- `scanInt`, with `scanDigitsW`. -/
+@[inline] def scanIntW (a : ByteArray) (i : Nat) : Option Nat :=
+  match byteAt a i with
+  | none => none
+  | some b => if b == 0x30 then some (i + 1) else if (digit19 b).isSome then some (scanDigitsW a (i + 1)) else none
+
+/-- `scanFrac`, with `scanDigitsW`. -/
+@[inline] def scanFracW (a : ByteArray) (i : Nat) : Option Nat :=
+  if byteIs a i 0x2E then scanDigits1W a (i + 1) else some i
+
+/-- `scanExp`, with `scanDigitsW`. -/
+@[inline] def scanExpW (a : ByteArray) (i : Nat) : Option Nat :=
+  if byteIs a i 0x65 || byteIs a i 0x45 then scanDigits1W a (if byteIs a (i + 1) 0x2B || byteIs a (i + 1) 0x2D then i + 2 else i + 1)
+  else some i
+
+/-- `scanNum`, with `scanDigitsW` (`scanNumW_eq`). -/
+@[inline] def scanNumW (a : ByteArray) (i : Nat) : Option Nat :=
+  match scanIntW a (if byteIs a i 0x2D then i + 1 else i) with
+  | none => none
+  | some i1 => match scanFracW a i1 with
+    | none => none
+    | some i2 => scanExpW a i2
+
+/-- `strBytes`, with the plain run at each position copied by one `copySlice` (`strBytesW_eq`). -/
+def strBytesW (a : ByteArray) (i : Nat) (b : ByteArray) : Option (ByteArray × Nat) :=
+  let p := i + plainOff a i 0
+  let b := a.copySlice i b b.size (p - i) false
+  if h : p < a.size then
+    if a[p] == 0x22 then some (b, p + 1)
+    else if plainAscii a[p] then strBytesW a (p + 1) (b.push a[p])
+    else match decodeCharA a p with
+      | some (n, j) => if p < j then strBytesW a j (pushChar b (Char.ofNat n)) else none
+      | none => none
+  else none
+termination_by a.size - i
+decreasing_by all_goals omega
+
 /-- The text of the string whose opening quote is at `i` appended to `text`, and the index after its closing quote: `TapeBuf.strNodeI` without the tape. A string with no escape and no non-ASCII byte is one copy. -/
 @[inline] def strW (m : ByteArray) (a : ByteArray) (i : Nat) (text : ByteArray) : Option (ByteArray × Nat) :=
   if byteIs a i 0x22 then
     let r := skipF m a.size (i + 1)
-    if byteIs a r 0x22 && plainRun a (i + 1) r then some (a.copySlice (i + 1) text text.size (r - i - 1) false, r + 1)
-    else match strBytes a (i + 1) text with
+    if i + 1 + plainOff a (i + 1) 0 == r && byteIs a r 0x22 then some (a.copySlice (i + 1) text text.size (r - i - 1) false, r + 1)
+    else match strBytesW a (i + 1) text with
       | some (t, j) => if r == j - 1 then some (t, j) else none
       | none => none
   else none
@@ -194,7 +271,7 @@ def runW (m : ByteArray) : Nat → ByteArray → Nat → Bool → ByteArray → 
         | some j => if delimAt a j then runW m f a j true (putNode tape tw (hdrW 1 0) 0) (tw + 2) text fst d else none
         | none => none
       else
-        match scanNum a i with
+        match scanNumW a i with
         | some j =>
           if delimAt a j then
             let o := text.size
