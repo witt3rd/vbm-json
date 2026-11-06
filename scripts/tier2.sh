@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Tier 2 (assurance gate, the SLOW checks; run on main after a merge, by CI: .github/workflows/core.yml):
-#  1. Tier 1 (everything quick: forbidden constructs, zero-warning build, the gates with their negative self-tests).
+#  1. Tier 1 (everything quick: forbidden constructs, zero-warning build, the guards and the real tests).
 #  2. The independent kernel re-check: `leanchecker --fresh` replays every declaration of LeanJson and LeanJsonProofs in a fresh environment
 #     (guards against a tampered or stale .olean).
 #  3. An independent external checker (nanoda) over the exported proof of both libraries and their dependencies.

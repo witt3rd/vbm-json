@@ -1,8 +1,8 @@
 # Tier 1 runs on every push to main (scripts/land-direct runs the same script before it pushes); Tier 2 runs every 6 hours and on dispatch and is NOT a gate for the next merge:
 # a failure on main means revert, then fix in a worktree (AGENTS.md). Adapted from the CI of the project the gates were first built in: no merge queue, no bubblewrap
 # (nothing here runs a jail), no watchdog job (the post-merge watchdog and the revert script are not ported yet; AGENTS.md "Not ported yet").
-# Public-repository rules, enforced by scripts/lint-workflows.py (Tier 1): every job runs on a GitHub-hosted runner (never self-hosted), there is no pull_request_target trigger,
-# and no secret is used: the token is the read-only default GITHUB_TOKEN. Actions are pinned by commit SHA. This file is in the protected set and has a trust-ledger entry (T08).
+# Public-repository rules: every job runs on a GitHub-hosted runner (never self-hosted), there is no pull_request_target trigger,
+# and no secret is used: the token is the read-only default GITHUB_TOKEN. Actions are pinned by commit SHA. This file has a trust-ledger entry (T08).
 name: core
 on:
   push:

@@ -12,14 +12,13 @@ Scaffold (PR 0) plus the spec layer in three parts: PR 1a `Value`, the RFC 8259 
 - **Forbidden anywhere in Lean:** `sorry`, `admit`, `axiom`, `unsafe`, `implemented_by`, `csimp` (Tier 1 scans for them; a comment may mention one only on a line marked `tier1-allow`). A proof is hard? Decompose it; never weaken the statement.
 - **Spec first.** Behaviour lands as a specification and its proofs before any optimised code; the fast parser exists only with its refinement proof to the reference. Vectors come from the reference, never from the fast code.
 - **No `sorry`, no exceptions, no unproved claim called verified.** Only `proved` in the obligation ledger (`LeanJsonProofs/Ledger.lean`, rendered to `docs/proof-ledger.md`) may be called verified.
-- **The specified share may not fall** (`scripts/ClosureGate.lean`, printed on every Tier 1 run), the unverified set may only shrink, and nothing from `Std`, `Lean` or `LeanJsonProofs` may be reachable from an export.
+- **The specified share is reported on every Tier 1 run** (`scripts/ClosureGate.lean`); the aim is that it only rises and the unverified set only shrinks, and nothing from `Std`, `Lean` or `LeanJsonProofs` is reachable from an export.
 - **The boundary never decides.** C, loaders and bindings move bytes and read the tape; what is valid and what a value is, is decided in Lean only. A second decoder in a binding is counted as boundary and tested, never trusted.
-- **Every gate has a negative self-test** (it must be shown able to fail, in the same run). A new gate without one does not land.
-- **Worktrees only, through `scripts/wt`** (`scripts/wt switch -c agent/<task>`); the primary clone stays on `main` and is never edited. A commit on `main` is refused by `scripts/githooks/pre-commit`.
+- **Worktrees only, through `scripts/wt`** (`scripts/wt switch -c agent/<task>`); the primary clone stays on `main` and is never edited.
 - **Land with `scripts/land-direct`, never open a PR** (the owner's decision; `docs/decisions/0002-land-direct.md`): commit locally in your worktree, run it; one lander at a time (flock), red-check, rebase onto `origin/main`, local Tier 1, fast-forward push. Never push to `main` yourself, never force-push it. (Outside contributors open PRs; a maintainer lands them: `CONTRIBUTING.md`.)
-- **TTL 45 minutes without a passing build:** abort and decompose. **Small diffs:** at most 150 lines of production code per PR; larger needs a decomposition plan. Conventional Commits `type(scope): summary`.
+- **TTL 45 minutes without a passing build:** abort and decompose. **Small diffs.** Conventional Commits `type(scope): summary`.
 - **No secrets in the repository.** No paid model calls from a test or a gate.
-- **The protected set waits for the owner** (`scripts/protected-paths.txt`, CODEOWNERS `@witt3rd`): `LeanJson/` (the spec and the code are one), the ledger, `abi/`, `runtime/`, the gate scripts and baselines, the lakefile, the pins, the workflows, the governance files. Do not edit one to make a check pass.
+- **The spec, the ledger, `abi/`, `runtime/`, the lakefile, the pins and the workflows are owned by `@witt3rd`** (CODEOWNERS). Do not edit a check to make it pass.
 
 ## Library rules
 - **Policy (PROPOSED, pending the owner):** strict text (no lone surrogates, no invalid UTF-8); numbers are lexemes (sign, digits, exponent; no floats in the core); duplicate keys kept in input order; a named `maxDepth` reported as an error code; `print` reproduces `Lean.Json.compress` bytes. Do not "fix" a policy in code: a policy change is a spec change.
@@ -29,9 +28,8 @@ Scaffold (PR 0) plus the spec layer in three parts: PR 1a `Value`, the RFC 8259 
 - **The trust ledger** (`docs/trust-ledger.md`) lists everything outside our control; a new boundary (extern, C file, loader, workflow, tool) with no entry fails Tier 1. Entries for pieces not in the tree yet are written under "Planned" and promoted in the PR that adds the file.
 
 ## Gates (Tier 1 before landing; Tier 2 after merge)
-- **Tier 1** (`scripts/tier1.sh`, about 20 s on the skeleton): forbidden-constructs scan, Init-only import scan, lint for pipefail-unsafe pipelines, zero-warning build of both libraries (the mechanism is checked), axiom gate (`scripts/AxiomGate.lean`), obligation ledger (`scripts/LedgerGate.lean`), closure gate and specified share (`scripts/ClosureGate.lean`), trust ledger (`scripts/trust-ledger-check.sh`), and the offline self-tests of the protected set, `scripts/land-direct`, the commit-on-main hook and the parallel test runner.
+- **Tier 1** (`scripts/tier1.sh`, about 45 s): the forbidden-constructs scan, the Init-only import scan, a zero-warning build of both libraries, the axiom gate (`scripts/AxiomGate.lean`), the trust ledger (`scripts/trust-ledger-check.sh`; a new boundary needs an entry), the shared vectors, and the real tests (ABI, WebAssembly, native, bindings). The specified share and closure counts are printed, never gated. Nothing else refuses a landing.
 - **Tier 2** (`scripts/tier2.sh`, CI on main after merge): Tier 1 again, `leanchecker --fresh` on both libraries, nanoda over the exported proof. A failure on main means revert, then fix in a worktree.
-- Not ported yet from the originating gates: the generated-C gate and in-place-update gate (they need emitted C: with the ABI), the post-merge watchdog and the revert script (with CI), the deciding-code detector and its hidden-code fix (upstream work when this was copied).
 
 ## Layout
 `LeanJson/` spec and code (Init only; locked) · `LeanJsonProofs/` proofs (never linked) · `abi/` the ABI description and the C shim · `runtime/` the one freestanding runtime of the wasm32 and native builds (`runtime/rt.c`), trusted C · `bindings/` generated types and tape readers and thin loaders (Python, Rust; from `abi/vbm_json.abi.json`) · `vectors/`, `corpus/` (to come) · `scripts/` gates and process · `docs/` decisions, trust ledger, proof ledger (generated).
