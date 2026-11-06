@@ -117,25 +117,7 @@ The full list, with what is assumed of each piece, where it enters and how it is
 
 ## The honest numbers
 
-Everything here is local to one machine and one session, not a CI result. Read the method before quoting any of it: [`docs/perf/`](docs/perf/).
-
-- **Speed.** Throughput through the C ABI on a 22-core machine, in MB/s (higher is better); the comparators ran on the same corpora in an earlier session of the same method:
-
-  | corpus | vbm-json | Python `json` | serde_json (`Value`) | simdjson (DOM) |
-  |---|---|---|---|---|
-  | twitter | 461 | 255 | 366 | 4687 |
-  | canada | 522 | 97 | 331 | 1440 |
-  | citm_catalog | 963 | 300 | 700 | 5038 |
-  | small objects | 232 | 107 | 91 | 1401 |
-  | string-heavy | 585 | 295 | 331 | 3149 |
-  | scorecard corpus | 399 | 117 | 171 | 1577 |
-
-  vbm-json is faster than Python's `json` module and than serde_json on all six corpora (1.3 to 2.7 times serde_json), and **3 to 10 times slower than simdjson**, which uses SIMD throughout and is not verified (vbm-json's own vector code is one small trusted shim for the first stage, with the proved portable path as fallback). Speed is priority two here: it is improved only with a proof that the faster code agrees with the reference. The profile shows the gap is in the Lean code (about 45 cycles per token against 5 to 10 in hand-written C), not in the C boundary (its two copies are about 5%).
-- **Verification effort.** Tier 1 (the gate run before every landing) takes about one minute on a warm cache and under four minutes cold on a clean four-core Ubuntu 24.04 container; Tier 2, which repeats the whole of Tier 1 and then re-checks every proof with `leanchecker` and the independent `nanoda`, took about 16 minutes there (the kernel part alone measured 116 s on a larger machine).
-- **Mutation testing** of the hand-written C shim and its tests: 100 over the non-equivalent mutants locally (90.3 raw, 28 of 31 killed, three survivors that are equivalent, two of them proved so); [`docs/mutants.md`](docs/mutants.md) lists every survivor. The published scorecard card, which scored an earlier version 61.3, is recomputed on a pinned commit.
-- **Scorecard.** The [vbm](https://github.com/witt3rd/vbm) scorecard measures this repository against the seven ideals in a sandbox, on a pinned commit: [the card](https://github.com/witt3rd/vbm/blob/main/registry/scores/witt3rd__vbm-json.md) (commit `0a6696c`; every metric on one page, with the raw JSON linked from it). Two verdicts: **Correctness PASS** (3 of 4 primary dimensions measured; trusted code generation has no metric yet) and **Landedness FAIL**: the warm fast gate took 91.2 s against the under-60 s floor in the 2-CPU, 4 GB sandbox (the cold run, 300.6 s, is within its 600 s ceiling). Level 1, Certified (an independent recheck of the proofs, no code of ours run), is not built yet: the card is not a certificate.
-- **What still fails or is open.** Of 20 claims in the ledger, 6 are proved, 9 are partial, 1 is open (the fast parser's bounded space) and 4 are limits that no machine can decide (for example, that the grammar matches the RFC text). Concurrent calls are not yet tested or promised. TypeScript and C# bindings are planned and not in the tree.
-
+Numbers rot when they are copied into prose, so none are kept here. **See the card:** [the scorecard card of this repository](https://github.com/witt3rd/vbm/blob/main/registry/scores/witt3rd__vbm-json.md) lists every metric on one page, measured by the [vbm](https://github.com/witt3rd/vbm) scorecard runner on a pinned commit (throughput against Python's `json`, serde_json and simdjson on six corpora, the verified share of the code, the trusted C, test and mutation evidence, the time of the landing check), with the raw JSON linked from it. The method behind the performance numbers, and the profile of where the time goes, are in [`docs/perf/`](docs/perf/) (`docs/perf/results.md` has the per-corpus tables of each change, each marked with the host and its load). What is proved, partial, open or a stated limit is in [`docs/proof-ledger.md`](docs/proof-ledger.md) (generated); mutation survivors are in [`docs/mutants.md`](docs/mutants.md). Concurrent calls are not yet tested or promised; TypeScript and C# bindings are planned and not in the tree.
 ## How it is developed
 
 The repository is agent-built and lands **directly on `main`**, one commit at a time, through a script that rebases, runs the whole of Tier 1 locally on exactly the result, and pushes a plain fast-forward; CI runs the same gate again on every push. There is no human line-by-line review: the checks are the review. Outside contributions are welcome as pull requests; a maintainer lands them through the same gate. See [`CONTRIBUTING.md`](CONTRIBUTING.md), [`docs/decisions/0002-land-direct.md`](docs/decisions/0002-land-direct.md), [`AGENTS.md`](AGENTS.md), and the standard it is measured against ([`vbm`](https://github.com/witt3rd/vbm)).
