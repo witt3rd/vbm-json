@@ -123,14 +123,14 @@ Everything here is local to one machine and one session, not a CI result. Read t
 
   | corpus | vbm-json | Python `json` | serde_json (`Value`) | simdjson (DOM) |
   |---|---|---|---|---|
-  | twitter | 202 | 255 | 366 | 4687 |
-  | canada | 159 | 97 | 331 | 1440 |
-  | citm_catalog | 271 | 300 | 700 | 5038 |
-  | small objects | 79 | 107 | 91 | 1401 |
-  | string-heavy | 275 | 295 | 331 | 3149 |
-  | scorecard corpus | 121 | 117 | 171 | 1577 |
+  | twitter | 461 | 255 | 366 | 4687 |
+  | canada | 522 | 97 | 331 | 1440 |
+  | citm_catalog | 963 | 300 | 700 | 5038 |
+  | small objects | 232 | 107 | 91 | 1401 |
+  | string-heavy | 585 | 295 | 331 | 3149 |
+  | scorecard corpus | 399 | 117 | 171 | 1577 |
 
-  vbm-json is in the range of Python's `json` module, below serde_json, and **an order of magnitude or more slower than simdjson**, which uses SIMD and is not verified. Speed is priority two here: it is improved only with a proof that the faster code agrees with the reference. The profile shows the gap is in the Lean code, not in the C boundary (the byte copying is under 1%).
+  vbm-json is faster than Python's `json` module and than serde_json on all six corpora (1.3 to 2.7 times serde_json), and **3 to 10 times slower than simdjson**, which uses SIMD throughout and is not verified (vbm-json's own vector code is one small trusted shim for the first stage, with the proved portable path as fallback). Speed is priority two here: it is improved only with a proof that the faster code agrees with the reference. The profile shows the gap is in the Lean code (about 45 cycles per token against 5 to 10 in hand-written C), not in the C boundary (its two copies are about 5%).
 - **Verification effort.** Tier 1 (the gate run before every landing) takes about one minute on a warm cache and under four minutes cold on a clean four-core Ubuntu 24.04 container; Tier 2, which repeats the whole of Tier 1 and then re-checks every proof with `leanchecker` and the independent `nanoda`, took about 16 minutes there (the kernel part alone measured 116 s on a larger machine).
 - **Mutation testing** of the hand-written C shim and its tests: 100 over the non-equivalent mutants locally (90.3 raw, 28 of 31 killed, three survivors that are equivalent, two of them proved so); [`docs/mutants.md`](docs/mutants.md) lists every survivor. The published scorecard card, which scored an earlier version 61.3, is recomputed on a pinned commit.
 - **Scorecard.** The [vbm](https://github.com/witt3rd/vbm) scorecard measures this repository against the seven ideals in a sandbox, on a pinned commit: [the card](https://github.com/witt3rd/vbm/blob/main/registry/scores/witt3rd__vbm-json.md) (commit `0a6696c`; every metric on one page, with the raw JSON linked from it). Two verdicts: **Correctness PASS** (3 of 4 primary dimensions measured; trusted code generation has no metric yet) and **Landedness FAIL**: the warm fast gate took 91.2 s against the under-60 s floor in the 2-CPU, 4 GB sandbox (the cold run, 300.6 s, is within its 600 s ceiling). Level 1, Certified (an independent recheck of the proofs, no code of ours run), is not built yet: the card is not a certificate.
