@@ -101,7 +101,7 @@ Entry format: **What** it is; **Enters** where it enters; **Assumes** what we as
 - **What:** `git` and `gh` (the red-check and the rebase and push steps of `scripts/land-direct`), `python3` (the trust-ledger checker), `wt` (Worktrunk: worktrees, `scripts/wt`). They run on the developer's machine and in CI; none is part of any artifact.
 - **Enters:** `scripts/land-direct`, `scripts/wt`, `scripts/trust_ledger.py`, `scripts/trust-ledger-check.sh`, the Tier 1 scripts.
 - **Assumes:** they do what their manuals say; the self-tests of the scripts that use them (scratch repos, a `gh` shim) are the check that our use of them is right; no written contract.
-- **Test:** scripts/test_land_direct.sh, scripts/test_protected_set.sh, scripts/test_githook.sh (each runs the real script against a scratch repository).
+- **Test:** none that can fail inside this repository: the lander is the vendored, pinned vbm-land (its own tests live there; scripts/land/bin/land-check verifies the copy is intact).
 - **Owner:** upstream tools; the owner approves the scripts (protected set).
 - **Plan:** accept, because they touch the process and not the artifact: a compromised tool could land a bad change, which the gates and the owner's review of protected paths are there to catch.
 - **Covers:** `tool:git` `tool:gh` `tool:python3` `tool:wt`

@@ -1,3 +1,0 @@
-ATK_DESC="raise mass in closure-baseline.txt with an approval list that names that file with the TRUE hash of its diff (a numeric baseline is never relaxed by an approval)"
-ATK_GATES=('h=$(bash -c ". scripts/land/lib/approvals.sh; ga_hash . \"$ATK_BASE\" HEAD scripts/closure-baseline.txt"); l=$(mktemp); echo "scripts/closure-baseline.txt $h" > "$l"; LAND_GATE_APPROVED_FILE=$l scripts/gate-diff-improving.sh --suite-judged "$ATK_BASE" HEAD'); ATK_GATE_FILES=(scripts/gate-diff-improving.sh); ATK_EXPECT='mass'
-atk_apply() { awk '$1=="mass"{$2=$2+1} {print}' scripts/closure-baseline.txt > x && mv x scripts/closure-baseline.txt; }

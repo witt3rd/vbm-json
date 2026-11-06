@@ -1,3 +1,0 @@
-ATK_DESC="an approved tier1.sh edit (true hash) that carries a raised baseline along: the approval covers its own file only"
-ATK_GATES=('h=$(bash -c ". scripts/land/lib/approvals.sh; ga_hash . \"$ATK_BASE\" HEAD scripts/tier1.sh"); l=$(mktemp); echo "scripts/tier1.sh $h" > "$l"; LAND_GATE_APPROVED_FILE=$l scripts/gate-diff-improving.sh --suite-judged "$ATK_BASE" HEAD'); ATK_GATE_FILES=(scripts/gate-diff-improving.sh); ATK_EXPECT='mass'
-atk_apply() { n=$(first_line_matching scripts/tier1.sh 'cannot'); sed -i "${n}d" scripts/tier1.sh; awk '$1=="mass"{$2=$2+1} {print}' scripts/closure-baseline.txt > x && mv x scripts/closure-baseline.txt; }

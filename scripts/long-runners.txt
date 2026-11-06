@@ -1,3 +1,0 @@
-# The declared long runners (scripts/lint-scoped-runners.sh): a command that runs one of these must go through scripts/run-scoped.sh NAME MAXSEC CMD... so an aborted run cannot orphan.
-# One file name (basename) per line; "#" starts a comment.
-mutants.py

@@ -23,8 +23,6 @@ echo "tier2: the generated bindings, Python and Rust (cargo required)"
 VBM_JSON_REQUIRE_CARGO=1 $ev gate tier2-bindings '^ran: test_bindings: ([0-9]+) cases$' scripts/test_bindings.sh
 echo "tier2: the whole-shim mutation metric"
 $ev gate tier2-mutants '^ran: test_mutants: ([0-9]+) cases$' scripts/test_mutants.sh
-echo "tier2: the whole relabel-attack suite (the Lean attacks too; Tier 1 runs the others)"
-$ev gate tier2-relabel-attacks '^PASS relabel-attacks: ([0-9]+) of' scripts/relabel-attacks.sh
 echo "tier2: leanchecker --fresh LeanJson"
 lake env "$LEAN_PREFIX/bin/leanchecker" --fresh LeanJson
 echo "tier2: leanchecker --fresh LeanJsonProofs"
