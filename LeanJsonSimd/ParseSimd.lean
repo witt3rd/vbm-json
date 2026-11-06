@@ -540,10 +540,10 @@ decreasing_by all_goals exact fuel_dec f ‹_›
 /-- Inputs of this many bytes (64 MiB) or more take the scalar parser: below it the tape (at most four words, 32 bytes, per fuel step, and one step per input byte plus two) and every position fit `USize` on every platform, 32 bits included (`runU_sound`). -/
 @[inline] def simdLimit : Nat := 67108864
 
-/-- The index-driven parser: the structural mask of the input (stage 1), then `runU`; on any decline, or an input of `simdLimit` or more, the scalar fused parser. The bytes are `parseTapeFast`'s (`parseTapeSimd_eq`, `LeanJsonProofs/ParseU.lean`, through `runU_sound` and `runW_sound`). This is the export `vbm_json_parse_tape`: it lives in this module because the C edge initialises `LeanJsonSimd.ParseSimd` (`abi/vbm_json.c`), which initialises everything it imports. -/
+/-- The index-driven parser: the structural mask of the input (stage 1, `stage1Fast`: the AVX2 classifier where the CPU has it), then `runU`; on any decline, or an input of `simdLimit` or more, the scalar fused parser. The bytes are `parseTapeFast`'s (`parseTapeSimd_eq`, `LeanJsonProofs/ParseU.lean`, through `runU_sound` and `runW_sound`). This is the export `vbm_json_parse_tape`: it lives in this module because the C edge initialises `LeanJsonSimd.ParseSimd` (`abi/vbm_json.c`), which initialises everything it imports. -/
 @[export vbm_json_parse_tape] def parseTapeSimd (a : ByteArray) : ByteArray :=
   if a.size < simdLimit then
-    let m := stage1 a
+    let m := stage1Fast a
     match runU m (a.usize + 2) a (skipU m a.usize 0) false zeros4k 0 .empty .nil maxDepth.toUSize with
     | some t => t
     | none => parseTapeFast a

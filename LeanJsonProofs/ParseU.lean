@@ -1,4 +1,5 @@
 import LeanJsonProofs.ParseW
+import LeanJsonProofs.Stage1Avx
 /-! # Proof: `runU` (positions, counters and fuel as `USize`) answers only what `runW` answers (`runU_sound`), and the export equals the scalar parser (`parseTapeSimd_eq`)
 
 `LeanJsonSimd/ParseSimd.lean`, `runU`. Every leaf of `runU` is shown equal, through `Nat.toNat`, to the leaf of `runW` it replaces (`byteIsU_eq`, `delimAtU_eq`, `skipU_eq`, `plainOffU_eq`, `scanDigitsU_eq`, `scanNumU_eq`, `lexOkU_eq`, `strU_eq`,
@@ -853,6 +854,7 @@ theorem parseTapeSimd_eq (a : ByteArray) : parseTapeSimd a = parseTapeFast a := 
   · simp only [hsz, ↓reduceIte]
     have hsz' : a.size < 2 ^ 26 := by unfold simdLimit at hsz; omega
     have hs31 : a.size < 2 ^ 31 := by omega
+    rw [stage1Fast_eq a hs31]
     have hmd : (maxDepth.toUSize).toNat = maxDepth := usize_toNat_small _ (by unfold maxDepth; decide)
     have hfu : (a.usize + 2).toNat = a.size + 2 := by
       rw [usize_add_lit _ 2 (by decide) (by have := usize_ge32; rw [usize_eq a (by omega)]; omega), usize_eq a (by omega)]

@@ -20,7 +20,7 @@ for f in LeanJsonSimd/Stage1 LeanJsonSimd/ParseSimd; do
   [ -f ".lake/build/ir/$f.c" ] || { echo "build_wasm: .lake/build/ir/$f.c missing: run lake build LeanJson:static first" >&2; exit 1; }
   clang "${cf[@]}" -include "$hdr" -c ".lake/build/ir/$f.c" -o "$tmp/s_$(basename "$f").o"; objs+=("$tmp/s_$(basename "$f").o")
 done
-for f in Spec Lanes Escape PrefixXor Shims Bytes Cursor; do
+for f in Spec Lanes Escape PrefixXor Shims Bytes Cursor Find Inset; do
   [ -f ".lake/packages/vbm-simd/.lake/build/ir/VbmSimd/$f.c" ] || { echo "build_wasm: the VbmSimd C of $f is missing" >&2; exit 1; }
   clang "${cf[@]}" -include "$hdr" -c ".lake/packages/vbm-simd/.lake/build/ir/VbmSimd/$f.c" -o "$tmp/v_$f.o"; objs+=("$tmp/v_$f.o")
 done

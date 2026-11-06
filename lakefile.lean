@@ -5,7 +5,7 @@ package «vbm-json» where
   leanOptions := #[⟨`warningAsError, true⟩, ⟨`autoImplicit, false⟩]
 
 /-- The reusable verified bit-parallel kernels (the model of the vector operations, the proved kernels, the trusted shim header): a pinned dependency. -/
-require «vbm-simd» from git "https://github.com/witt3rd/vbm-simd" @ "433268697353f3b5f0ad1197b2ab2475d270dae9"
+require «vbm-simd» from git "https://github.com/witt3rd/vbm-simd" @ "e01a3fc2f10951a5101751dd212a4ac9e8d2a4de"
 
 /-- The library: specification and code, one Lean core. Imports `Init` only (checked by Tier 1): this is what is compiled to C, to WASM and into
 every consumer, so nothing from `Std` or `Lean` may be in its closure (a `Lean.*` import forces full runtime initialisation). The export `vbm_json_parse_tape` is the bit-parallel parser of `LeanJsonSimd`, so the objects of that
@@ -15,7 +15,7 @@ lean_lib LeanJson where
   -- every module under LeanJson/ is built, imported by the umbrella or not: a module cannot hide from the build
   globs := #[.andSubmodules `LeanJson]
   moreLinkObjs := #[`+LeanJsonSimd.Stage1:o, `+LeanJsonSimd.ParseSimd:o, `@«vbm-simd»/+VbmSimd.Spec:o, `@«vbm-simd»/+VbmSimd.Lanes:o, `@«vbm-simd»/+VbmSimd.Escape:o, `@«vbm-simd»/+VbmSimd.PrefixXor:o,
-    `@«vbm-simd»/+VbmSimd.Shims:o, `@«vbm-simd»/+VbmSimd.Bytes:o, `@«vbm-simd»/+VbmSimd.Cursor:o]
+    `@«vbm-simd»/+VbmSimd.Shims:o, `@«vbm-simd»/+VbmSimd.Bytes:o, `@«vbm-simd»/+VbmSimd.Cursor:o, `@«vbm-simd»/+VbmSimd.Find:o, `@«vbm-simd»/+VbmSimd.Inset:o]
 
 /-- The bit-parallel structural stage and the index-driven parser (docs/perf/simd-plan.md): `LeanJson` plus the pinned dependency `VbmSimd` (checked by scripts/test_simd_imports.sh). Compiled with the dependency's trusted shim
 header (static inline loads, stores and ctz) first in every generated C file. It holds the export `vbm_json_parse_tape` (`parseTapeSimd`). -/

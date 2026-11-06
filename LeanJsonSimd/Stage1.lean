@@ -4,6 +4,8 @@ import VbmSimd.Escape
 import VbmSimd.PrefixXor
 import VbmSimd.Shims
 import VbmSimd.Bytes
+import VbmSimd.Find
+import VbmSimd.Inset
 /-! # `LeanJsonSimd.Stage1`: the bit-parallel structural stage (64 bytes at a time)
 
 `docs/perf/simd-plan.md`. For each block of 64 bytes the kernel loads eight words, classifies them with `VbmSimd.eqLanes` and `pack8` into four masks (quotes, backslashes, operators, whitespace), finds the unescaped quotes (the
@@ -62,5 +64,30 @@ def stage1 (a : ByteArray) : ByteArray :=
   let out := stage1Loop a (zeroBytes (8 * n)) 0 n 0 0 0
   if a.size % 64 == 0 then out
   else st64 out (n - 1).toUSize (ld64 out (8 * (n - 1)).toUSize &&& (((1 : UInt64) <<< (a.size % 64).toUInt64) - 1))
+
+/-! ## The AVX2 classifier
+
+Where the CPU has AVX2 the four class masks of a block (quotes, backslashes, operators, white space) come from `VbmSimd.inset64`, the trusted shim of vbm-simd (clause VS-12, trust ledger T12: a vector search whose Lean body, the model, is the
+per-byte machine `insetSpec`), instead of from the word-at-a-time `blockOut`; everything after the masks (`maskOut`: the escape carry, the string state, the scalar starts) is the same proved Lean. `stage1Fast` takes the shim only where
+`hasAvx2 ()` and runs the portable `stage1` otherwise; `stage1Fast_eq` (`LeanJsonProofs/Stage1Avx.lean`) says `stage1Fast a = stage1 a` for either answer of the CPU test, by the model of the shim. -/
+
+/-- Stage 1 over the blocks `k .. n - 1`, the four class masks from the AVX2 membership shim (the sets: `"`; `\`; `, : {` `}` and `[ ]`; space, tab, LF, CR). -/
+def stage1LoopA (a out : ByteArray) (k n : Nat) (esc str scal : UInt64) : ByteArray :=
+  if k < n then
+    let i := (64 * k).toUSize
+    match maskOut (inset64 a i 0x22222222) (inset64 a i 0x5c5c5c5c) (inset64 a i 0x7d7b3a2c ||| inset64 a i 0x5d5b5d5b) (inset64 a i 0x0d0a0920) esc str scal with
+    | (s, esc', str', scal') => stage1LoopA a (st64 out k.toUSize s) (k + 1) n esc' str' scal'
+  else out
+termination_by n - k
+
+/-- `stage1` with the AVX2 classifier: the same masks, the same last-block clearing. -/
+def stage1A (a : ByteArray) : ByteArray :=
+  let n := (a.size + 63) / 64
+  let out := stage1LoopA a (zeroBytes (8 * n)) 0 n 0 0 0
+  if a.size % 64 == 0 then out
+  else st64 out (n - 1).toUSize (ld64 out (8 * (n - 1)).toUSize &&& (((1 : UInt64) <<< (a.size % 64).toUInt64) - 1))
+
+/-- The structural mask the parser uses: the AVX2 classifier on a CPU that has AVX2 (and the OS support: `hasAvx2`), the portable `stage1` otherwise. -/
+def stage1Fast (a : ByteArray) : ByteArray := if hasAvx2 () then stage1A a else stage1 a
 
 end LeanJson

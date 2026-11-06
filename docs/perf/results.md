@@ -174,3 +174,22 @@ Through the C ABI (`docs/perf/prof.c`, `leanc -O2`, static library, best of 3 wi
 | twitter | 631515 | 256.8 | 319.5 | 1.24 |
 
 No corpus is slower. The scorecard corpus is at about 2.0x of serde_json (163.8 in the table above, same host).
+
+## Round two, slice 3: the AVX2 classifier of stage 1 (the fourth trusted shim)
+
+After slice 1 the sampler put stage 1 at 22% of the scorecard corpus (12% of small-objects, 25% of canada, 22% of twitter): about 41 ns per block of 64 bytes, about 140 cycles, in the portable SWAR classifier (eight words, four `eqLanes` or `pack8` chains each). The four class masks of a block (quotes, backslashes, operators, white space) now come from `VbmSimd.inset64`, a trusted AVX2 shim in the pinned vbm-simd (its landing: clause VS-12, ledger T12, `include/vbm_simd.h`; Lean model `insetSpec`, the per-byte machine; `scripts/test-shims.sh`: 3.5 million comparisons against the model, a guard-page test, seven mutants of the C each caught), in the pattern of the three before it. `LeanJsonSimd.Stage1.stage1Fast` takes it **only where `hasAvx2 ()`** (cpuid and xgetbv, cached in the shim) and runs the proved portable `stage1` otherwise (arm64, wasm, an x86-64 CPU without AVX2); the escape carry, the string state and the scalar starts (`maskOut`) are the same proved Lean for both. `stage1Fast_eq : stage1Fast a = stage1 a` (`LeanJsonProofs/Stage1Avx.lean`) holds for either answer of the CPU test, by the model: each of the four sets flags exactly the bytes of the portable class mask (256 cases per class; the padding byte 0 is in none). The shim is a carve-out outside the share (`scripts/carveouts.txt`: `VbmSimd.inset64`, `VbmSimd.hasAvx2`, ledger T14); the specified share stays **100.00%** (spec 42526 of 42526 nodes; boundary 49: `hasAvx2`, `ctz`, `ld64`, `st64`, `inset64`).
+
+A mistake found on the way, worth the class: `hasAvx2 ()` in `stage1Fast` was extracted by the compiler as a closed constant computed once at start-up (`lean_uint8_once`), a runtime function the freestanding builds do not have (the native and wasm tests failed to link); passing a `Unit` that depends on the input does not help (a `Unit` is always `box 0`), the cure is `never_extract` on the shim's declaration (vbm-simd `e01a3fc`).
+
+Through the C ABI, as before (A = after slice 1, B = this slice; best of 3 windows of 1 s; **local, host x, load 0.8 at the start, 1.6 at the end, about 5% noise**):
+
+| corpus | bytes | MB/s A | MB/s B (AVX2 stage 1) | B / A |
+|---|---|---|---|---|
+| canada | 2251051 | 384.6 | 472.2 | 1.23 |
+| citm_catalog | 1727204 | 680.2 | 924.0 | 1.36 |
+| scorecard corpus | 1033424 | 322.3 | 390.5 | 1.21 |
+| small-objects | 2412355 | 187.0 | 195.6 | 1.05 |
+| string-heavy | 2915939 | 435.8 | 535.7 | 1.23 |
+| twitter | 631515 | 312.8 | 369.2 | 1.18 |
+
+Stage 1 is now 9% of the scorecard corpus (the shim 6%, the Lean loop around it 3%). A batch kernel (the four masks of 32 blocks in one call with the constants hoisted: measured in C alone at 4 ns per block against 10 ns for five calls) would take most of the rest of that 9% and is not built.
