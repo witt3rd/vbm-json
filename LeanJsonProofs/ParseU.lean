@@ -847,6 +847,14 @@ theorem runU_sound (a : ByteArray) (hsz : a.size < 2 ^ 26) :
           · simp only [hclose, Bool.false_eq_true, ↓reduceIte] at h
             simp at h
 
+theorem initTape_size (cap : Nat) : (initTape cap).size = 4096 := by
+  unfold initTape
+  have hz : zeros4k.size = 4096 := (zeroBytes_spec 4096).1
+  have e0 : (ByteArray.emptyWithCapacity cap).size = 0 := rfl
+  have h := copy_append zeros4k (ByteArray.emptyWithCapacity cap) 0 4096
+  rw [h, ByteArray.size_append, e0, ByteArray.size_extract, hz]
+  omega
+
 /-- The index-driven parser returns exactly what the scalar fused parser returns (and so, by `parseTapeFast_eq`, the tape of the `Value`). -/
 theorem parseTapeSimd_eq (a : ByteArray) : parseTapeSimd a = parseTapeFast a := by
   unfold parseTapeSimd
@@ -861,14 +869,16 @@ theorem parseTapeSimd_eq (a : ByteArray) : parseTapeSimd a = parseTapeFast a := 
     have hk := sk0 a hsz' 0 (by rw [usize_zero_toNat]; omega)
     rw [usize_zero_toNat] at hk
     have hz : zeros4k.size = 4096 := (zeroBytes_spec 4096).1
-    cases hr : runU (stage1 a) (a.usize + 2) a (skipU (stage1 a) a.usize 0) false zeros4k 0 ByteArray.empty FStack.nil maxDepth.toUSize with
+    generalize hT : initTape (16 * popLoop (stage1 a) ((stage1 a).size / 8) 0 0 + 4096) = T0
+    have ht0 : T0.size = 4096 := by rw [← hT]; exact initTape_size _
+    cases hr : runU (stage1 a) (a.usize + 2) a (skipU (stage1 a) a.usize 0) false T0 0 (ByteArray.emptyWithCapacity a.size) FStack.nil maxDepth.toUSize with
     | none => rfl
     | some t =>
-      have hW := runU_sound a hsz' (a.size + 2) (a.usize + 2) _ false zeros4k 0 ByteArray.empty FStack.nil maxDepth.toUSize t hfu
+      have hW := runU_sound a hsz' (a.size + 2) (a.usize + 2) _ false T0 0 (ByteArray.emptyWithCapacity a.size) FStack.nil maxDepth.toUSize t hfu
         (by have := skipI_le (stage1 a) a.size 0; omega) (by rw [usize_zero_toNat]; omega) (by rw [usize_zero_toNat]; omega) (by rw [hmd]; unfold maxDepth; simp [fsLen]) hr
       rw [hk, usize_zero_toNat, hmd] at hW
-      have h0 : Rel zeros4k 0 ByteArray.empty ⟨ByteArray.empty, ByteArray.empty⟩ := ⟨by simp, by simp [ByteArray.size_empty], fun n hn => by omega, rfl⟩
-      have hI := runW_sound a hs31 _ _ false zeros4k 0 ByteArray.empty FStack.nil maxDepth ⟨ByteArray.empty, ByteArray.empty⟩ t
+      have h0 : Rel T0 0 (ByteArray.emptyWithCapacity a.size) ⟨ByteArray.empty, ByteArray.empty⟩ := ⟨by omega, by simp [ByteArray.size_empty], fun n hn => by omega, rfl⟩
+      have hI := runW_sound a hs31 _ _ false T0 0 (ByteArray.emptyWithCapacity a.size) FStack.nil maxDepth ⟨ByteArray.empty, ByteArray.empty⟩ t
         (by omega) h0 trivial hW
       have h := parseTapeI_eq a
       unfold parseTapeI at h

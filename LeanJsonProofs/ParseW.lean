@@ -162,9 +162,11 @@ theorem finishW_eq {tape tw text tb} (hr : Rel tape tw text tb) : finishW tape t
   have hle : 8 * tw ≤ tape.size := hr.le
   unfold finishW tapeOk
   rw [hw, htx, hx]
-  generalize hH : pushWordFast (pushWordFast (pushWordFast .empty 0) (UInt64.ofNat tw)) (UInt64.ofNat text.size) = H
+  generalize hH : pushWordFast (pushWordFast (pushWordFast (ByteArray.emptyWithCapacity (24 + 8 * tw + text.size)) 0) (UInt64.ofNat tw)) (UInt64.ofNat text.size) = H
   have hh : H.size = 24 := by
-    rw [← hH]; simp only [pushWordFast_eq, size_pushWord]; rfl
+    rw [← hH]; simp only [pushWordFast_eq, size_pushWord, show (ByteArray.emptyWithCapacity (24 + 8 * tw + text.size)).size = 0 from rfl]
+  have hHe : pushWordFast (pushWordFast (pushWordFast ByteArray.empty 0) (UInt64.ofNat tw)) (UInt64.ofNat text.size) = H := hH
+  rw [hHe]
   have e1 : tape.copySlice 0 H 24 (8 * tw) false = H ++ tape.extract 0 (8 * tw) := by
     rw [ByteArray.copySlice_eq_append, ← hh]
     have a1 : H.extract 0 H.size = H := ByteArray.extract_zero_size

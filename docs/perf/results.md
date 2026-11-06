@@ -193,3 +193,20 @@ Through the C ABI, as before (A = after slice 1, B = this slice; best of 3 windo
 | twitter | 631515 | 312.8 | 369.2 | 1.18 |
 
 Stage 1 is now 9% of the scorecard corpus (the shim 6%, the Lean loop around it 3%). A batch kernel (the four masks of 32 blocks in one call with the constants hoisted: measured in C alone at 4 ns per block against 10 ns for five calls) would take most of the rest of that 9% and is not built.
+
+## Round two, slice 4: the tape, the text and the result are allocated with their capacity (no doubling copy)
+
+The sampler of the tree after slice 3 (a profile build whose handler also records the return address, to say who called libc's `memcpy`): `lean_copy_sarray` 4.6% (scorecard corpus), 6.7% (canada), 9.3% (small-objects), and the `memcpy` under `lean_byte_array_copy_slice` another 3 to 8%. The first is the runtime growing a byte array that has no room left: every `copySlice` or `push` onto an array at capacity allocates twice the capacity and copies everything written so far. The tape (grown 4096 bytes at a time), the text region and the result (`finishW`: the header, then the tape appended, then the text appended: two growths) each did it, about one full copy of the output more than the parse needs. Now the three arrays are allocated with their capacity and filled within it: the text with the input's size (a hint: no theorem depends on it), the tape with `16 * popcount(structural mask) + 4096` bytes (every node starts at a set bit of the mask and a node is 16 bytes; `popLoop`, a tail-recursive count over the words of the mask, about 0.2 operations per input byte; the pages of the capacity that are never written are never touched) in `initTape`, and the result with `24 + 8 * tw + text.size`. In the proof only sizes matter (`initTape_size`; `finishW_eq` takes `emptyWithCapacity c = empty`, which is `rfl`).
+
+Through the C ABI (A = after slice 3, B = this slice; best of 3 windows of 1 s; **local, host x, load 2.4 at the start (above 2: reported), 1.4 at the end, about 5% noise**):
+
+| corpus | bytes | MB/s A | MB/s B | B / A |
+|---|---|---|---|---|
+| canada | 2251051 | 472.0 | 531.6 | 1.13 |
+| citm_catalog | 1727204 | 957.5 | 972.5 | 1.02 |
+| scorecard corpus | 1033424 | 366.7 | 387.6 | 1.06 |
+| small-objects | 2412355 | 207.0 | 228.0 | 1.10 |
+| string-heavy | 2915939 | 536.0 | 586.1 | 1.09 |
+| twitter | 631515 | 368.7 | 364.1 | 0.99 |
+
+(twitter: 0.99 is within the noise; its strings are short, mostly non-ASCII, and its time is in `strBytesW`.)

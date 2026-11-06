@@ -231,7 +231,7 @@ termination_by e - p
 
 /-- The result bytes of a finished parse from the in-place tape and text: the three header words, the tape, the text (`finishW_eq`). -/
 def finishW (tape text : ByteArray) (tw : Nat) : ByteArray :=
-  let h := pushWordFast (pushWordFast (pushWordFast .empty 0) (UInt64.ofNat tw)) (UInt64.ofNat text.size)
+  let h := pushWordFast (pushWordFast (pushWordFast (ByteArray.emptyWithCapacity (24 + 8 * tw + text.size)) 0) (UInt64.ofNat tw)) (UInt64.ofNat text.size)
   let r := tape.copySlice 0 h 24 (8 * tw) false
   text.copySlice 0 r r.size text.size false
 
@@ -537,6 +537,23 @@ def runU (m : ByteArray) (f : USize) (a : ByteArray) (i : USize) (ret : Bool) (t
 termination_by f.toNat
 decreasing_by all_goals exact fuel_dec f ‹_›
 
+/-- The number of set bits of a word (the usual shift, mask and add chain). -/
+@[inline] def popcnt64 (x : UInt64) : UInt64 :=
+  let x := x - ((x >>> 1) &&& (0x5555555555555555 : UInt64))
+  let x := (x &&& (0x3333333333333333 : UInt64)) + ((x >>> 2) &&& (0x3333333333333333 : UInt64))
+  let x := (x + (x >>> 4)) &&& (0x0f0f0f0f0f0f0f0f : UInt64)
+  (x * (0x0101010101010101 : UInt64)) >>> 56
+
+/-- The number of set bits in the first `f` words of the mask array from word `k` (a capacity hint, `acc` the running sum, a tail call: the tape holds at most two words per node and every node starts at a set bit of the structural mask). -/
+def popLoop (m : ByteArray) : Nat → Nat → Nat → Nat
+  | 0, _, acc => acc
+  | f + 1, k, acc => popLoop m f (k + 1) (acc + (popcnt64 (ld64 m (8 * k).toUSize)).toNat)
+
+/-- The starting tape: 4096 zero bytes in an array with room for `cap` bytes, so that the tape grows in place (`growTape` appends within the capacity) instead of by the runtime's doubling copy. The capacity is a hint that no theorem depends on. -/
+def initTape (cap : Nat) : ByteArray :=
+  let e := ByteArray.emptyWithCapacity cap
+  zeros4k.copySlice 0 e e.size 4096 false
+
 /-- Inputs of this many bytes (64 MiB) or more take the scalar parser: below it the tape (at most four words, 32 bytes, per fuel step, and one step per input byte plus two) and every position fit `USize` on every platform, 32 bits included (`runU_sound`). -/
 @[inline] def simdLimit : Nat := 67108864
 
@@ -544,7 +561,7 @@ decreasing_by all_goals exact fuel_dec f ‹_›
 @[export vbm_json_parse_tape] def parseTapeSimd (a : ByteArray) : ByteArray :=
   if a.size < simdLimit then
     let m := stage1Fast a
-    match runU m (a.usize + 2) a (skipU m a.usize 0) false zeros4k 0 .empty .nil maxDepth.toUSize with
+    match runU m (a.usize + 2) a (skipU m a.usize 0) false (initTape (16 * popLoop m (m.size / 8) 0 0 + 4096)) 0 (ByteArray.emptyWithCapacity a.size) .nil maxDepth.toUSize with
     | some t => t
     | none => parseTapeFast a
   else parseTapeFast a
