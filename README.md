@@ -8,7 +8,7 @@ A JSON parser (RFC 8259) whose correctness is a machine-checked theorem, written
  Lean specification ──► Lean proofs ──► Lean-generated C ──► native library ──► C, Python, Rust
  (grammar, policies,    (checked by       (the same code,      WebAssembly module   (generated tape
   reference parser,      Lean's kernel     not a rewrite)      (no imports)         readers, no logic)
-  fast parser)           and by nanoda)
+  fast parser)           and by nanoda and leanchecker)
 ```
 
 ## Why it exists
@@ -19,9 +19,9 @@ vbm-json takes the other route. There is **one** parser, its correctness is a th
 
 ## The ethos: verified bare metal (VBM)
 
-VBM is a standard for libraries that are small, proved, and run on nothing. See [the VBM standard (coming soon)](https://github.com/witt3rd/vbm). In this repository it means four things.
+VBM is a standard for libraries that are small, proved, and run on nothing. See [the VBM standard](https://github.com/witt3rd/vbm). In this repository it means four things.
 
-- **Verified: proofs, not tests.** The specification is the RFC 8259 grammar written as a Lean relation. Proved today (see the ledger for the exact theorems): a reference parser derived from that grammar is **sound and complete** (it accepts exactly the documents the grammar derives, with the value the grammar assigns) and **total**; and the fast parser that ships **provably equals** the reference (`parseFast_eq_parse`). Other claims are partly proved: that the grammar is unambiguous, that the printer round-trips and prints valid JSON, and that the tape encoding is faithful. The ledger says exactly which parts are proved and which are open, and only a `proved` claim is called verified anywhere in this repository.
+- **Verified: proofs, not tests.** The specification is the RFC 8259 grammar written as a Lean relation. Proved today (see the ledger for the exact theorems): a reference parser derived from that grammar is **sound and complete** (it accepts exactly the documents the grammar derives, with the value the grammar assigns) and **total**; and the parser the exports run **provably equals** the reference (`parseTapeSimd_eq`, proved through `parseFast_eq_parse`). Other claims are partly proved: that the grammar is unambiguous, that the printer round-trips and prints valid JSON, and that the tape encoding is faithful. The ledger says exactly which parts are proved and which are open, and only a `proved` claim is called verified anywhere in this repository.
 - **Bare metal.** The verified core imports only Lean's `Init`; it is compiled to freestanding C and to a WebAssembly module that imports nothing. No libc, no WASI, no operating-system calls. Memory is a small runtime of our own (`runtime/rt.c`) or your allocator.
 - **Correct by construction.** The Lean specification *is* the code that runs: C and WebAssembly are generated from it. The test vectors are generated from the specification's reference parser, never from the fast one, and every binding runs all of them (the vendored [JSONTestSuite](https://github.com/nst/JSONTestSuite) included). A trusted-base ledger names every hand-written piece and what is assumed of it.
 - **Built agentically.** Coding agents wrote the specifications, the proofs and the generated code, under mechanical gates instead of line-by-line human review: forbidden constructs (`sorry`, `admit`, new axioms, `unsafe`, `implemented_by`, `csimp`) fail the build, and the proofs, the axiom check and the real tests decide what lands.
@@ -59,7 +59,7 @@ Error codes: `VBM_JSON_SYNTAX` (not valid), `VBM_JSON_DEPTH` (nested deeper than
 
 ### WebAssembly
 
-`tests/wasm/vbm_json.mjs` is a 40-line loader with no dependencies (Node or a browser); the module takes an empty import object.
+`tests/wasm/vbm_json.mjs` is a 68-line loader with no dependencies (Node or a browser); the module takes an empty import object.
 
 ```js
 import { readFileSync } from "node:fs";
@@ -93,7 +93,7 @@ A Lean project can use the specification and code directly, with no C in between
 
 ## Build and test
 
-You need [`mise`](https://mise.jdx.dev), `git` and `python3` with PyYAML. `mise install` fetches the pinned Lean release (with the clang and lld it bundles); there is no `elan`. The Tier 2 checks also need `node`, `cargo` and the C library headers (`libc6-dev` on Debian and Ubuntu).
+You need [`mise`](https://mise.jdx.dev), `git` and `python3`. `mise install` fetches the pinned Lean release (with the clang and lld it bundles); there is no `elan`. The Tier 2 checks also need `node`, `cargo` and the C library headers (`libc6-dev` on Debian and Ubuntu).
 
 ```sh
 mise install
@@ -134,11 +134,11 @@ Everything here is local to one machine and one session, not a CI result. Read t
 - **Verification effort.** Tier 1 (the gate run before every landing) takes about one minute on a warm cache and under four minutes cold on a clean four-core Ubuntu 24.04 container; Tier 2, which repeats the whole of Tier 1 and then re-checks every proof with `leanchecker` and the independent `nanoda`, took about 16 minutes there (the kernel part alone measured 116 s on a larger machine).
 - **Mutation testing** of the hand-written C shim and its tests: 100 over the non-equivalent mutants locally (90.3 raw, 28 of 31 killed, three survivors that are equivalent, two of them proved so); [`docs/mutants.md`](docs/mutants.md) lists every survivor. The published scorecard card, which scored an earlier version 61.3, is recomputed on a pinned commit.
 - **Scorecard.** The [vbm](https://github.com/witt3rd/vbm) scorecard measures this repository against the seven ideals in a sandbox, on a pinned commit: [the card](https://github.com/witt3rd/vbm/blob/main/registry/scores/witt3rd__vbm-json.md) (commit `0a6696c`; every metric on one page, with the raw JSON linked from it). Two verdicts: **Correctness PASS** (3 of 4 primary dimensions measured; trusted code generation has no metric yet) and **Landedness FAIL**: the warm fast gate took 91.2 s against the under-60 s floor in the 2-CPU, 4 GB sandbox (the cold run, 300.6 s, is within its 600 s ceiling). Level 1, Certified (an independent recheck of the proofs, no code of ours run), is not built yet: the card is not a certificate.
-- **What still fails or is open.** Of 18 claims in the ledger, 5 are proved, 8 are partial, 1 is open (the fast parser's bounded space) and 4 are limits that no machine can decide (for example, that the grammar matches the RFC text). Concurrent calls are not yet tested or promised. TypeScript and C# bindings are planned and not in the tree.
+- **What still fails or is open.** Of 20 claims in the ledger, 6 are proved, 9 are partial, 1 is open (the fast parser's bounded space) and 4 are limits that no machine can decide (for example, that the grammar matches the RFC text). Concurrent calls are not yet tested or promised. TypeScript and C# bindings are planned and not in the tree.
 
 ## How it is developed
 
-The repository is agent-built and lands **directly on `main`**, one commit at a time, through a script that rebases, runs the whole of Tier 1 locally on exactly the result, and pushes a plain fast-forward; CI runs the same gate again on every push. There is no human line-by-line review: the checks are the review. Outside contributions are welcome as pull requests; a maintainer lands them through the same gate. See [`CONTRIBUTING.md`](CONTRIBUTING.md), [`docs/decisions/0002-land-direct.md`](docs/decisions/0002-land-direct.md), [`AGENTS.md`](AGENTS.md), and how the VBM standard describes landing (coming soon, in [the VBM standard](https://github.com/witt3rd/vbm)).
+The repository is agent-built and lands **directly on `main`**, one commit at a time, through a script that rebases, runs the whole of Tier 1 locally on exactly the result, and pushes a plain fast-forward; CI runs the same gate again on every push. There is no human line-by-line review: the checks are the review. Outside contributions are welcome as pull requests; a maintainer lands them through the same gate. See [`CONTRIBUTING.md`](CONTRIBUTING.md), [`docs/decisions/0002-land-direct.md`](docs/decisions/0002-land-direct.md), [`AGENTS.md`](AGENTS.md), and the standard it is measured against ([`vbm`](https://github.com/witt3rd/vbm)).
 
 More: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) (one page), [`docs/TRUST.md`](docs/TRUST.md), the design record [`docs/decisions/0001-vbm-json.md`](docs/decisions/0001-vbm-json.md).
 
