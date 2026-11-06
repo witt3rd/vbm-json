@@ -97,14 +97,14 @@ Entry format: **What** it is; **Enters** where it enters; **Assumes** what we as
 - **Plan:** sandbox. Pin the release checksum in `mise.toml` (a lockfile) once the CI exists; until then the tarball's integrity is GitHub's.
 - **Covers:** `tool:mise`
 
-### T07. git, gh, flock, python3, Worktrunk: the optional process tooling
-- **What:** `git` and `gh` (the red-check and the rebase and push steps of `scripts/land-direct`), `flock` (the lander's mutex), `python3` (the trust-ledger checker), `wt` (Worktrunk: worktrees, `scripts/wt`). They run on the developer's machine and in CI; none is part of any artifact.
+### T07. git, gh, python3, Worktrunk: the optional process tooling
+- **What:** `git` and `gh` (the red-check and the rebase and push steps of `scripts/land-direct`), `python3` (the trust-ledger checker), `wt` (Worktrunk: worktrees, `scripts/wt`). They run on the developer's machine and in CI; none is part of any artifact.
 - **Enters:** `scripts/land-direct`, `scripts/wt`, `scripts/trust_ledger.py`, `scripts/trust-ledger-check.sh`, the Tier 1 scripts.
 - **Assumes:** they do what their manuals say; the self-tests of the scripts that use them (scratch repos, a `gh` shim) are the check that our use of them is right; no written contract.
 - **Test:** scripts/test_land_direct.sh, scripts/test_protected_set.sh, scripts/test_githook.sh (each runs the real script against a scratch repository).
 - **Owner:** upstream tools; the owner approves the scripts (protected set).
 - **Plan:** accept, because they touch the process and not the artifact: a compromised tool could land a bad change, which the gates and the owner's review of protected paths are there to catch.
-- **Covers:** `tool:git` `tool:gh` `tool:flock` `tool:python3` `tool:wt`
+- **Covers:** `tool:git` `tool:gh` `tool:python3` `tool:wt`
 
 ### T08. The CI runner and workflow actions (GitHub Actions: core.yml)
 - **What:** `.github/workflows/core.yml` runs `scripts/tier1.sh` on every push to `main`, and `scripts/tier2.sh` every 6 hours (schedule) and on manual dispatch, on GitHub-hosted `ubuntu-latest` runners only (never self-hosted: `scripts/lint-workflows.py` fails Tier 1 on a self-hosted label, on a `pull_request_target` trigger and on any secret other than the default token). The workflow has no pull-request trigger, so a fork's code never runs with the repository's token. The runner image supplies `git`, `python3` (with PyYAML), `node`, `cargo` and the C library headers; the pinned Lean, with its clang, lld, `leanchecker` and `nanoda_bin`, comes from `mise install`. Pushes touching only `*.md` files other than the three ledgers Tier 1 reads skip CI. It uses three third-party actions pinned by commit sha (a comment names the tag): `actions/checkout` v4, `actions/cache` v4 (restores `.lake`, keyed on `lake-manifest.json` and a hash of `LeanJson/` and `LeanJsonProofs/`) and `jdx/mise-action` v2 (installs mise and the pinned Lean). Token: the default `GITHUB_TOKEN`, `contents: read`; no secrets.
