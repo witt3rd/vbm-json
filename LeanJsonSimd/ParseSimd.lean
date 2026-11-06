@@ -195,6 +195,50 @@ termination_by a.size - i
     | none => none
     | some i2 => scanExpW a i2
 
+
+/-- `decodeUtf8A`, in continuation-passing style: the continuation `k` takes the scalar and the index after it (no `Option` and no pair is built). -/
+@[inline] def decodeUtf8K {β : Type} (a : ByteArray) (i : Nat) (k : Nat → Nat → β) (d : β) : β :=
+  match byteAt a i with
+  | none => d
+  | some x =>
+    if x.toNat < 0x80 then k x.toNat (i + 1)
+    else if 0xC2 ≤ x.toNat ∧ x.toNat ≤ 0xDF then
+      match byteAt a (i + 1) with
+      | some b => if Tail b then k ((x.toNat - 0xC0) * 64 + (b.toNat - 0x80)) (i + 2) else d
+      | none => d
+    else if 0xE0 ≤ x.toNat ∧ x.toNat ≤ 0xEF then
+      match byteAt a (i + 1), byteAt a (i + 2) with
+      | some b, some c => if Second3 x b ∧ Tail c then k ((x.toNat - 0xE0) * 4096 + (b.toNat - 0x80) * 64 + (c.toNat - 0x80)) (i + 3) else d
+      | _, _ => d
+    else if 0xF0 ≤ x.toNat ∧ x.toNat ≤ 0xF4 then
+      match byteAt a (i + 1), byteAt a (i + 2), byteAt a (i + 3) with
+      | some b, some c, some e =>
+        if Second4 x b ∧ Tail c ∧ Tail e then k ((x.toNat - 0xF0) * 262144 + (b.toNat - 0x80) * 4096 + (c.toNat - 0x80) * 64 + (e.toNat - 0x80)) (i + 4) else d
+      | _, _, _ => d
+    else d
+
+/-- `decodeUA`, in continuation-passing style. -/
+@[inline] def decodeUK {β : Type} (a : ByteArray) (i : Nat) (k : Nat → Nat → β) (d : β) : β :=
+  match hex4At a i with
+  | none => d
+  | some n =>
+    if n < 0xD800 ∨ 0xE000 ≤ n then k n (i + 4)
+    else if n < 0xDC00 then
+      if byteIs a (i + 4) 0x5C && byteIs a (i + 5) 0x75 then
+        match hex4At a (i + 6) with
+        | some lo => if 0xDC00 ≤ lo ∧ lo < 0xE000 then k (0x10000 + (n - 0xD800) * 0x400 + (lo - 0xDC00)) (i + 10) else d
+        | none => d
+      else d
+    else d
+
+/-- `decodeCharA`, in continuation-passing style. -/
+@[inline] def decodeCharK {β : Type} (a : ByteArray) (i : Nat) (k : Nat → Nat → β) (d : β) : β :=
+  if byteIs a i 0x5C then
+    match byteAt a (i + 1) with
+    | none => d
+    | some b => if b == 0x75 then decodeUK a (i + 2) k d else match simpleEsc b with | some n => k n (i + 2) | none => d
+  else decodeUtf8K a i (fun n j => if 0x20 ≤ n ∧ n ≠ 0x22 ∧ n ≠ 0x5C then k n j else d) d
+
 /-- `strBytes`, with the plain run at each position copied by one `copySlice` (`strBytesW_eq`). -/
 def strBytesW (a : ByteArray) (i : Nat) (b : ByteArray) : Option (ByteArray × Nat) :=
   let p := i + plainOff a i 0
@@ -202,9 +246,7 @@ def strBytesW (a : ByteArray) (i : Nat) (b : ByteArray) : Option (ByteArray × N
   if h : p < a.size then
     if a[p] == 0x22 then some (b, p + 1)
     else if plainAscii a[p] then strBytesW a (p + 1) (b.push a[p])
-    else match decodeCharA a p with
-      | some (n, j) => if p < j then strBytesW a j (pushChar b (Char.ofNat n)) else none
-      | none => none
+    else decodeCharK a p (fun n j => if p < j then strBytesW a j (pushChar b (Char.ofNat n)) else none) none
   else none
 termination_by a.size - i
 decreasing_by all_goals omega

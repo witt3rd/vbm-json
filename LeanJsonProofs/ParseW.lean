@@ -288,6 +288,86 @@ theorem strBytes_quote (a : ByteArray) (r : Nat) (b : ByteArray) (h : byteIs a r
   have : a[r] = 0x22 := by rw [← byteD_eq a r hr]; exact hb
   simp [hr, this]
 
+/-! ## The continuation-passing decoder is the decoder -/
+
+theorem decodeUtf8K_eq {β : Type} (a : ByteArray) (i : Nat) (k : Nat → Nat → β) (d : β) :
+    decodeUtf8K a i k d = (match decodeUtf8A a i with | some (n, j) => k n j | none => d) := by
+  unfold decodeUtf8K decodeUtf8A
+  cases byteAt a i with
+  | none => rfl
+  | some x =>
+    simp only []
+    by_cases h1 : x.toNat < 0x80
+    · simp only [h1, ↓reduceIte]
+    · simp only [h1, ↓reduceIte]
+      by_cases h2 : 0xC2 ≤ x.toNat ∧ x.toNat ≤ 0xDF
+      · simp only [h2, and_self, ↓reduceIte]
+        cases byteAt a (i + 1) with
+        | none => rfl
+        | some b =>
+          simp only []
+          by_cases h3 : Tail b <;> simp only [h3, ↓reduceIte]
+      · simp only [h2, ↓reduceIte]
+        by_cases h3 : 0xE0 ≤ x.toNat ∧ x.toNat ≤ 0xEF
+        · simp only [h3]
+          rcases hb : byteAt a (i + 1) with _ | b
+          · rfl
+          · rcases hc : byteAt a (i + 2) with _ | c
+            · rfl
+            · simp only []
+              by_cases h4 : Second3 x b ∧ Tail c <;> simp only [h4, and_self, ↓reduceIte]
+        · simp only [h3]
+          by_cases h4 : 0xF0 ≤ x.toNat ∧ x.toNat ≤ 0xF4
+          · simp only [h4, ↓reduceIte]
+            rcases hb : byteAt a (i + 1) with _ | b
+            · rfl
+            · rcases hc : byteAt a (i + 2) with _ | c
+              · rfl
+              · rcases hd : byteAt a (i + 3) with _ | e
+                · rfl
+                · simp only []
+                  by_cases h5 : Second4 x b ∧ Tail c ∧ Tail e <;> simp only [h5, and_self, ↓reduceIte]
+          · simp only [h4, ↓reduceIte]
+
+theorem decodeUK_eq {β : Type} (a : ByteArray) (i : Nat) (k : Nat → Nat → β) (d : β) :
+    decodeUK a i k d = (match decodeUA a i with | some (n, j) => k n j | none => d) := by
+  unfold decodeUK decodeUA
+  rcases hn : hex4At a i with _ | n
+  · rfl
+  · simp only []
+    by_cases h1 : n < 0xD800 ∨ 0xE000 ≤ n
+    · simp only [h1, ↓reduceIte]
+    · simp only [h1, ↓reduceIte]
+      by_cases h2 : n < 0xDC00
+      · simp only [h2, ↓reduceIte]
+        by_cases h3 : (byteIs a (i + 4) 0x5C && byteIs a (i + 5) 0x75) = true
+        · simp only [h3, ↓reduceIte]
+          rcases hl : hex4At a (i + 6) with _ | lo
+          · rfl
+          · simp only []
+            by_cases h4 : 0xDC00 ≤ lo ∧ lo < 0xE000 <;> simp only [h4, and_self, ↓reduceIte]
+        · simp only [h3, Bool.false_eq_true, ↓reduceIte]
+      · simp only [h2, ↓reduceIte]
+
+theorem decodeCharK_eq {β : Type} (a : ByteArray) (i : Nat) (k : Nat → Nat → β) (d : β) :
+    decodeCharK a i k d = (match decodeCharA a i with | some (n, j) => k n j | none => d) := by
+  unfold decodeCharK decodeCharA
+  by_cases h1 : byteIs a i 0x5C = true
+  · simp only [h1, ↓reduceIte]
+    rcases hb : byteAt a (i + 1) with _ | b
+    · rfl
+    · simp only []
+      by_cases h2 : (b == 0x75) = true
+      · simp only [h2, ↓reduceIte]; exact decodeUK_eq a (i + 2) k d
+      · simp only [h2, Bool.false_eq_true, ↓reduceIte]
+        rcases hs : simpleEsc b with _ | n <;> rfl
+  · simp only [h1, Bool.false_eq_true, ↓reduceIte]
+    rw [decodeUtf8K_eq]
+    rcases hu : decodeUtf8A a i with _ | ⟨n, j⟩
+    · rfl
+    · simp only []
+      by_cases h3 : 0x20 ≤ n ∧ n ≠ 0x22 ∧ n ≠ 0x5C <;> simp [h3]
+
 /-- `strBytes` with the plain runs copied at once is `strBytes`. -/
 theorem strBytesW_eq (a : ByteArray) (hs : a.size < 2 ^ 31) : ∀ d i b, a.size - i = d → strBytesW a i b = strBytes a i b := by
   intro d
@@ -315,6 +395,7 @@ theorem strBytesW_eq (a : ByteArray) (hs : a.size < 2 ^ 31) : ∀ d i b, a.size 
         · simp only [hpl2, ↓reduceIte]
           exact ih (a.size - (p + 1)) (by omega) (p + 1) _ rfl
         · simp only [hpl2, Bool.false_eq_true, ↓reduceIte]
+          rw [decodeCharK_eq]
           cases hdc : decodeCharA a p with
           | none => rfl
           | some nj =>
