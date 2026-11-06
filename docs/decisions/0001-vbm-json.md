@@ -59,7 +59,7 @@ which bindings first (TypeScript and Rust); where CI runs (GitHub Actions: Linux
 closure gate; and the shared `lean-gates` (copy now, extract at the second library: section 8).
 
 ## 7. Consequences
-- The spec lock is the protected set (`scripts/protected-paths.txt`, CODEOWNERS): `LeanJson/` is the specification **and** the code, so every change to it waits for the owner; proofs (`LeanJsonProofs/`, except the ledger) do not.
+- `LeanJson/` is the specification **and** the code. Changes to it land like any other change (the spec lock and the owner-approval wait were withdrawn 2026-11-06).
 - Forbidden anywhere: `sorry`, `admit`, new axioms, `unsafe`, `[implemented_by]`, `[csimp]` (Tier 1 scan). A proof that is hard is decomposed, never weakened.
 - The gates are copies of the originating project's, adapted: the handler class and handler-mass ratchet are not carried over (there are no handlers: the boundary never decides); the deciding-code detector and
   the hidden-code fix were not yet upstream when this was copied and are to be ported when they land.

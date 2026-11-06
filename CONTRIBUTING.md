@@ -28,7 +28,7 @@ The maintainers' own work (mostly done by AI agents in parallel worktrees) lands
 - **Only a `proved` claim in the ledger may be called verified.** Do not lower the proved count or the specified share; they only go up.
 - **The boundary never decides.** C, loaders and bindings move bytes and read the tape; what is valid JSON is decided in Lean.
 - **A new boundary** (an `extern`, a C file, a loader, a workflow, a tool) needs an entry in `docs/trust-ledger.md`, or Tier 1 fails.
-- **Specification, ABI, trusted C, pins and workflows** are owned by a maintainer: please do not edit a check to make it pass.
+- **Checks, pins and workflows:** please do not edit a check to make something pass.
 - No secrets in the repository; workflows run on GitHub-hosted runners only and never use `pull_request_target`.
 
 ## The maintainers' tools, in plain words

@@ -18,7 +18,7 @@ Scaffold (PR 0) plus the spec layer in three parts: PR 1a `Value`, the RFC 8259 
 - **Land with `scripts/land-direct`, never open a PR** (the owner's decision; `docs/decisions/0002-land-direct.md`): commit locally in your worktree, run it; one lander at a time (flock), red-check, rebase onto `origin/main`, local Tier 1, fast-forward push. Never push to `main` yourself, never force-push it. (Outside contributors open PRs; a maintainer lands them: `CONTRIBUTING.md`.)
 - **TTL 45 minutes without a passing build:** abort and decompose. **Small diffs.** Conventional Commits `type(scope): summary`.
 - **No secrets in the repository.** No paid model calls from a test or a gate.
-- **The spec, the ledger, `abi/`, `runtime/`, the lakefile, the pins and the workflows are owned by `@witt3rd`** (CODEOWNERS). Do not edit a check to make it pass.
+- **Anything in the repository may be edited and landed like any change** (spec, proofs, code, scripts, docs, this file); only the lander files and the signing keys are off limits. Do not weaken a check to make it pass.
 
 ## Library rules
 - **Policy (PROPOSED, pending the owner):** strict text (no lone surrogates, no invalid UTF-8); numbers are lexemes (sign, digits, exponent; no floats in the core); duplicate keys kept in input order; a named `maxDepth` reported as an error code; `print` reproduces `Lean.Json.compress` bytes. Do not "fix" a policy in code: a policy change is a spec change.
@@ -32,4 +32,4 @@ Scaffold (PR 0) plus the spec layer in three parts: PR 1a `Value`, the RFC 8259 
 - **Tier 2** (`scripts/tier2.sh`, CI on main after merge): Tier 1 again, `leanchecker --fresh` on both libraries, nanoda over the exported proof. A failure on main means revert, then fix in a worktree.
 
 ## Layout
-`LeanJson/` spec and code (Init only; locked) · `LeanJsonProofs/` proofs (never linked) · `abi/` the ABI description and the C shim · `runtime/` the one freestanding runtime of the wasm32 and native builds (`runtime/rt.c`), trusted C · `bindings/` generated types and tape readers and thin loaders (Python, Rust; from `abi/vbm_json.abi.json`) · `vectors/`, `corpus/` (to come) · `scripts/` gates and process · `docs/` decisions, trust ledger, proof ledger (generated).
+`LeanJson/` spec and code (Init only) · `LeanJsonProofs/` proofs (never linked) · `abi/` the ABI description and the C shim · `runtime/` the one freestanding runtime of the wasm32 and native builds (`runtime/rt.c`), trusted C · `bindings/` generated types and tape readers and thin loaders (Python, Rust; from `abi/vbm_json.abi.json`) · `vectors/`, `corpus/` (to come) · `scripts/` gates and process · `docs/` decisions, trust ledger, proof ledger (generated).
