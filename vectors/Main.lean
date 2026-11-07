@@ -101,6 +101,13 @@ def main (args : List String) : IO UInt32 := do
   if rows.any (fun r => (tamper r).check) then
     IO.eprintln "vectors: the row check cannot fail (a tampered row passed)"
     return 1
+  -- the byte printer (the compiled code) writes the row's canonical bytes for the value of every accepted row, and a string's literal is `escapeString` of its UTF-8
+  let printDiff := rows.filter fun r => match r.result, parse r.input with
+    | .ok c, .ok v => (printBytes v).data.toList != c || (match v with | .str t => (escapeString t.toUTF8).data.toList != c | _ => false)
+    | _, _ => false
+  if let r :: _ := printDiff then
+    IO.eprintln s!"vectors: the byte printer differs from the reference printer on {printDiff.length} row(s), the first: {r.json 0}"
+    return 1
   -- the fast parser against the reference on every row (verdict, error code and value), and the same check shown able to fail on two mutants
   let diff := disagreements parseFast rows
   if let r :: _ := diff then
@@ -165,7 +172,7 @@ def main (args : List String) : IO UInt32 := do
   let jts ← runJts jtsDir
   if jts != 0 then return jts
   if args.contains "--check" then
-    IO.println s!"vectors: {rows.length} rows consistent with the reference; the check rejects tampered rows; the fast parser agrees with the reference on every row, and the differential rejects two mutants; the fused tape parser gives parseTape's bytes on every row and the differential rejects three mutants; {fuzz} random and {fuzz} mutated inputs agree"
+    IO.println s!"vectors: {rows.length} rows consistent with the reference; the check rejects tampered rows; the byte printer gives the canonical bytes of every accepted row; the fast parser agrees with the reference on every row, and the differential rejects two mutants; the fused tape parser gives parseTape's bytes on every row and the differential rejects three mutants; {fuzz} random and {fuzz} mutated inputs agree"
     return 0
   -- the JSONTestSuite files as rows of set `jts` (the reference's verdict on each file), so every binding and the C ABI test run them too
   let jtsFiles := (← System.FilePath.readDir jtsDir).map (·.fileName) |>.filter (·.endsWith ".json") |>.qsort (· < ·)

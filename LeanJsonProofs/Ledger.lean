@@ -1,5 +1,6 @@
 import LeanJsonProofs.Grammar
 import LeanJsonProofs.Print
+import LeanJsonProofs.PrintBytes
 import LeanJsonProofs.Policy
 import LeanJsonProofs.Fast
 import LeanJsonProofs.FastLoop
@@ -37,6 +38,7 @@ def ledger : List Obligation := [
   O "parse-is-complete" (.proved [``LeanJson.parse_complete, ``LeanJson.parseFast_complete]),
   O "print-parse-round-trip" (.partly [``LeanJson.print_roundtrip, ``LeanJson.print_canonical, ``LeanJson.parseFast_print] "parse (print v) = v for every value within maxDepth (a value deeper than maxDepth is printed and then refused with the depth code, so the unconditional statement is false by policy); print then parse then print is stable. Proved of the reference, the printer and the fast parser (`parseFast_print`); open: the printer is not an export yet (no entry point), so its side is about a model"),
   O "print-output-is-accepted" (.partly [``LeanJson.print_json] "print's output is derivable in the grammar, for every value. Proved of the printer and the grammar; open: the printer is not an export yet (no entry point)"),
+  O "print-bytes-equal-reference-printer" (.proved [``LeanJson.printBytes_eq, ``LeanJson.escapeString_eq, ``LeanJson.pushString_eq, ``LeanJson.pushNumber_eq]),
   O "print-reproduces-lean-compress" (.limit "byte equality with Lean.Json.compress is a one-time differential run on the corpus (the consumer's journal hash chains cover bytes), deleted after migration"),
   -- the fast parser
   O "fast-parser-refines-reference" (.proved [``LeanJson.parseFast_eq_parse]),

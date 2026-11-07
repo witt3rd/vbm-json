@@ -8,6 +8,7 @@ import LeanJsonProofs.Print
 import LeanJsonProofs.Policy
 import LeanJsonProofs.Fast
 import LeanJsonProofs.Tape
+import LeanJsonProofs.PrintBytes
 import LeanJsonProofs.Layout
 import LeanJsonProofs.FastTape
 import LeanJsonProofs.FastNum
