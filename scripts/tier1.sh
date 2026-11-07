@@ -18,7 +18,9 @@ lake build LeanJson LeanJsonProofs vbm-json-vectors LeanJson:static LeanJsonSimd
 # 2a. Only the standard axioms. 2d. A new trusted boundary has a trust-ledger entry. 2e. The shared vectors agree with the Lean reference.
 lake env lean --run scripts/AxiomGate.lean
 scripts/trust-ledger-check.sh
-lake exe vbm-json-vectors --check --n 3
+vdir=$(mktemp -d); trap 'rm -rf "$vdir"' EXIT   # generating runs every check of --check (reference consistency, fast parser, fused tape parser, JSONTestSuite) and writes the rows the tests below share
+lake exe vbm-json-vectors --n 4 --out "$vdir"
+export VBM_JSON_VECTORS="$vdir/vectors.jsonl" VBM_OBJ_CACHE="$vdir/obj"
 # Reported, not gated: the specified share and the closure counts.
 lake env lean --run scripts/ClosureGate.lean || true
 # 4. The real tests, in parallel.

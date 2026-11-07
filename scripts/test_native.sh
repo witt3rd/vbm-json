@@ -24,8 +24,8 @@ done
 [ "$(nm -D --defined-only "$tmp/lib/libvbm_json.so" | sed 's/^[0-9a-f]* . //' | sort | tr '\n' ' ')" = "vbm_json_free vbm_json_parse " ] || { echo "test_native: libvbm_json.so exports more than the ABI" >&2; exit 1; }
 echo "test_native: nm -u is empty for the object and the shared library; the only exports are vbm_json_parse and vbm_json_free"
 # 2. the vectors against this library only
-.lake/build/bin/vbm-json-vectors --n 4 --out "$tmp/v" >/dev/null
-v="$tmp/v/vectors.jsonl"
+v=${VBM_JSON_VECTORS:-}   # tier1 generates the vectors once and shares them; alone, the script generates its own
+[ -n "$v" ] || { .lake/build/bin/vbm-json-vectors --n 4 --out "$tmp/v" >/dev/null; v="$tmp/v/vectors.jsonl"; }
 leanc "${SYSFLAGS[@]}" -Wall -Wextra -Werror -I include -o "$tmp/abi_test" tests/abi_test.c "$tmp/lib/libvbm_json.a"
 "$tmp/abi_test" "$v" | sed 's/^/test_native: /'; ran_case
 leanc "${SYSFLAGS[@]}" -Wall -Wextra -Werror -I include -o "$tmp/dump_free" tests/abi_dump.c "$tmp/lib/libvbm_json.a"

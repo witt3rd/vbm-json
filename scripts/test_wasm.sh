@@ -18,8 +18,8 @@ mapfile -t SYSFLAGS < <(sysinc_flags "${VBM_JSON_SYSINCLUDE:-/usr/include}")
 [ -x .lake/build/bin/vbm-json-vectors ] && [ -f .lake/build/lib/libvbm_x2djson_LeanJson.a ] || lake build LeanJson:static vbm-json-vectors >/dev/null   # tier1 builds these once; concurrent lake runs in one tree are avoided
 lib=.lake/build/lib/libvbm_x2djson_LeanJson.a; [ -f "$lib" ] || { echo "test_wasm: $lib was not built" >&2; exit 1; }
 scripts/build_wasm.sh "$tmp/vbm.wasm"
-.lake/build/bin/vbm-json-vectors --n 4 --out "$tmp/v" >/dev/null
-v="$tmp/v/vectors.jsonl"
+v=${VBM_JSON_VECTORS:-}   # tier1 generates the vectors once and shares them; alone, the script generates its own
+[ -n "$v" ] || { .lake/build/bin/vbm-json-vectors --n 4 --out "$tmp/v" >/dev/null; v="$tmp/v/vectors.jsonl"; }
 run() { node tests/wasm/wasm_test.mjs "$1" "$2" "$tmp/w.$BASHPID.txt"; }   # each (concurrent) run has its own answer file; the main shell's is $tmp/w.$$.txt   # run WASM VECTORS
 run "$tmp/vbm.wasm" "$v"; ran_case
 leanc "${SYSFLAGS[@]}" -Wall -Wextra -Werror -I include -o "$tmp/abi_dump" tests/abi_dump.c abi/vbm_json.c "$lib" \

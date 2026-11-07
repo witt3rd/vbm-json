@@ -23,8 +23,8 @@ preflight "${VBM_JSON_SYSINCLUDE:-/usr/include}"
 mapfile -t SYSFLAGS < <(sysinc_flags "${VBM_JSON_SYSINCLUDE:-/usr/include}")
 [ -x .lake/build/bin/vbm-json-vectors ] && [ -f .lake/build/lib/libvbm_x2djson_LeanJson.a ] || lake build LeanJson:static vbm-json-vectors >/dev/null   # tier1 builds these once; concurrent lake runs in one tree are avoided
 lib=.lake/build/lib/libvbm_x2djson_LeanJson.a; [ -f "$lib" ] || { echo "test_abi: $lib was not built" >&2; exit 1; }
-.lake/build/bin/vbm-json-vectors --n 4 --out "$tmp/v" >/dev/null
-v="$tmp/v/vectors.jsonl"
+v=${VBM_JSON_VECTORS:-}   # tier1 generates the vectors once and shares them; alone, the script generates its own
+[ -n "$v" ] || { .lake/build/bin/vbm-json-vectors --n 4 --out "$tmp/v" >/dev/null; v="$tmp/v/vectors.jsonl"; }
 build() { leanc "${SYSFLAGS[@]}" -Wall -Wextra -Werror -I include -o "$1" tests/abi_test.c "$2" "$lib"; }   # build OUT SHIM.c
 build "$tmp/abi_test" abi/vbm_json.c
 "$tmp/abi_test" "$v"; ran_case   # every row, depth, allocator, leak

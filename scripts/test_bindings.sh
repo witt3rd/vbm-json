@@ -21,8 +21,8 @@ scripts/gen-bindings.sh --check; ran_case
 # 3. the library and the vectors
 scripts/build_shared.sh "$tmp/lib" >/dev/null
 [ -x .lake/build/bin/vbm-json-vectors ] && [ -f .lake/build/lib/libvbm_x2djson_LeanJson.a ] || lake build vbm-json-vectors >/dev/null   # tier1 builds these once; concurrent lake runs in one tree are avoided
-.lake/build/bin/vbm-json-vectors --n 4 --out "$tmp/v" >/dev/null
-v="$tmp/v/vectors.jsonl"
+v=${VBM_JSON_VECTORS:-}   # tier1 generates the vectors once and shares them; alone, the script generates its own
+[ -n "$v" ] || { .lake/build/bin/vbm-json-vectors --n 4 --out "$tmp/v" >/dev/null; v="$tmp/v/vectors.jsonl"; }
 export VBM_JSON_LIB="$tmp/lib/libvbm_json.so"
 py() { python3 tests/bindings/test_python.py "$1" "${2:-bindings/python}"; }
 py "$v"; ran_case
