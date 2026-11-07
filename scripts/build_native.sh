@@ -6,6 +6,7 @@
 # Env (self-tests only): VBM_RT_C replaces runtime/rt.c; VBM_EXTRA_C adds C files (compiled like the rest), VBM_KEEP adds global symbols to keep (to prove the nm check can fail).
 # Usage: build_native.sh OUTDIR [--no-so]   (run from anywhere; lake must have built LeanJson:static first, this script does it). Prints the sizes.
 set -euo pipefail
+. "$(dirname "$0")/lib-objcache.sh"
 here=$(cd "$(dirname "$0")/.." && pwd); cd "$here"
 out=${1:?usage: build_native.sh OUTDIR}; mkdir -p "$out"
 [ -f .lake/build/lib/libvbm_x2djson_LeanJson.a ] || lake build LeanJson:static >/dev/null
@@ -18,22 +19,22 @@ cf+=("${arch[@]}")
 objs=()
 for f in Value Policy Grammar Reference Print Parse Struct Tape; do
   [ -f ".lake/build/ir/LeanJson/$f.c" ] || { echo "build_native: .lake/build/ir/LeanJson/$f.c missing" >&2; exit 1; }
-  clang "${cf[@]}" -c ".lake/build/ir/LeanJson/$f.c" -o "$tmp/$f.o"; objs+=("$tmp/$f.o")
+  cc "${cf[@]}" -c ".lake/build/ir/LeanJson/$f.c" -o "$tmp/$f.o"; objs+=("$tmp/$f.o")
 done
 # the bit-parallel parser (the export `vbm_json_parse_tape`): LeanJsonSimd and the pinned dependency VbmSimd, each with the dependency's trusted header (docs/trust-ledger.md T14) included first
 hdr="$here/.lake/packages/vbm-simd/include/vbm_simd.h"; [ -f "$hdr" ] || { echo "build_native: $hdr missing" >&2; exit 1; }
 for f in LeanJsonSimd/Stage1 LeanJsonSimd/ParseSimd; do
   [ -f ".lake/build/ir/$f.c" ] || { echo "build_native: .lake/build/ir/$f.c missing" >&2; exit 1; }
-  clang "${cf[@]}" -include "$hdr" -c ".lake/build/ir/$f.c" -o "$tmp/s_$(basename "$f").o"; objs+=("$tmp/s_$(basename "$f").o")
+  cc "${cf[@]}" -include "$hdr" -c ".lake/build/ir/$f.c" -o "$tmp/s_$(basename "$f").o"; objs+=("$tmp/s_$(basename "$f").o")
 done
 for f in Spec Lanes Escape PrefixXor Shims Bytes Cursor Find Inset; do
   [ -f ".lake/packages/vbm-simd/.lake/build/ir/VbmSimd/$f.c" ] || { echo "build_native: the VbmSimd C of $f is missing" >&2; exit 1; }
-  clang "${cf[@]}" -include "$hdr" -c ".lake/packages/vbm-simd/.lake/build/ir/VbmSimd/$f.c" -o "$tmp/v_$f.o"; objs+=("$tmp/v_$f.o")
+  cc "${cf[@]}" -include "$hdr" -c ".lake/packages/vbm-simd/.lake/build/ir/VbmSimd/$f.c" -o "$tmp/v_$f.o"; objs+=("$tmp/v_$f.o")
 done
 # the shim is compiled as the scorecard compiles it: freestanding, with the Lean include directory only (lean_mini.h stands in for lean.h); the runtime with the stub headers
-clang "${arch[@]}" -ffreestanding -nostdlib -nostdinc -ffunction-sections -fdata-sections -O2 -fPIC -DNDEBUG -Wall -Wextra -Werror -I include -I "$tc/include" -c abi/vbm_json.c -o "$tmp/abi.o"; objs+=("$tmp/abi.o")
-clang "${cf[@]}" -Wall -Wextra -Werror -c "${VBM_RT_C:-runtime/rt.c}" -o "$tmp/rt.o"; objs+=("$tmp/rt.o")
-for x in ${VBM_EXTRA_C:-}; do clang "${cf[@]}" -c "$x" -o "$tmp/x$(basename "$x").o"; objs+=("$tmp/x$(basename "$x").o"); done
+cc "${arch[@]}" -ffreestanding -nostdlib -nostdinc -ffunction-sections -fdata-sections -O2 -fPIC -DNDEBUG -Wall -Wextra -Werror -I include -I "$tc/include" -c abi/vbm_json.c -o "$tmp/abi.o"; objs+=("$tmp/abi.o")
+cc "${cf[@]}" -Wall -Wextra -Werror -c "${VBM_RT_C:-runtime/rt.c}" -o "$tmp/rt.o"; objs+=("$tmp/rt.o")
+for x in ${VBM_EXTRA_C:-}; do cc "${cf[@]}" -c "$x" -o "$tmp/x$(basename "$x").o"; objs+=("$tmp/x$(basename "$x").o"); done
 keep=(vbm_json_parse vbm_json_free ${VBM_KEEP:-})
 und_args=(); for k in "${keep[@]}"; do und_args+=(--undefined="$k"); done
 ld.lld -r --gc-sections "${und_args[@]}" -o "$tmp/all.o" "${objs[@]}"
