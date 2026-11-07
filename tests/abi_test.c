@@ -13,6 +13,7 @@
 #include <string.h>
 #include <signal.h>
 #include <unistd.h>
+#include <sys/wait.h>
 #include <lean/lean.h>
 #include "../include/vbm_json.h"
 
@@ -255,6 +256,29 @@ static void default_block(void) {
   } else vbm_json_free(&t);
 }
 
+
+/* The size limits of the printing entry points (an input the Lean runtime cannot hold is VBM_JSON_ARG, refused before any allocation). Just past the limit the call is refused with ARG; AT the limit it is not: it goes on to allocate
+ * about 2^63 bytes, which no machine can do, so the Lean runtime ends the process ("out of memory"). That is observed in a child process: the child must not come back with ARG (which is what a limit one too low would answer). */
+static int at_limit_returns_arg(int which) {   /* 0: nwords at the limit, 1: ntext at the limit, 2: escape_string len at the limit */
+  fflush(NULL);
+  pid_t pid = fork();
+  if (pid < 0) return -1;
+  if (pid == 0) {
+    freopen("/dev/null", "w", stderr);
+    size_t lim = (size_t)LEAN_MAX_SMALL_NAT;
+    uint64_t w[2] = { 0, 0 }; uint8_t x[1] = { 0 };
+    vbm_json_tape t = { 0, 0, 0, 0, 0, 0, {0, 0, 0} }; vbm_json_bytes b; int rc;
+    t.words = w; t.text = x;
+    if (which == 0) { t.nwords = lim / 8; rc = vbm_json_print_tape(&t, NULL, &b); }
+    else if (which == 1) { t.nwords = 2; t.ntext = lim; rc = vbm_json_print_tape(&t, NULL, &b); }
+    else rc = vbm_json_escape_string(x, lim, NULL, &b);
+    _exit(rc == VBM_JSON_ARG ? 0 : 3);
+  }
+  int st = 0;
+  if (waitpid(pid, &st, 0) != pid) return -1;
+  return WIFEXITED(st) && WEXITSTATUS(st) == 0;
+}
+
 static void allocator(void) {
   default_block();
   counting c = {0}; vbm_json_allocator al = { &c, c_alloc, c_free }; vbm_json_opts o = { sizeof o, &al };
@@ -296,6 +320,22 @@ static void allocator(void) {
     pc.fail_at = 0;
     vbm_json_opts pbad = { sizeof po, &(vbm_json_allocator){ 0, 0, 0 } };
     if (vbm_json_print_tape(&pt, &pbad, &b) != VBM_JSON_ARG || vbm_json_escape_string(samp, samp_n, &pbad, &b) != VBM_JSON_ARG) fail("an allocator with no functions is not ARG for printing", "alloc", 0);
+    for (size_t sz = 0; sz < sizeof po; sz += 4) {   /* printing takes the same opts: one too short to hold the allocator is refused, on both entry points */
+      vbm_json_opts old = { sz, &pal };
+      if (vbm_json_print_tape(&pt, &old, &b) != VBM_JSON_ARG || vbm_json_escape_string(samp, samp_n, &old, &b) != VBM_JSON_ARG) fail("opts too short to hold the allocator are not ARG for printing", "alloc", sz);
+    }
+    vbm_json_allocator phalf[2] = { { &pc, c_alloc, 0 }, { &pc, 0, c_free } };   /* both functions are required, each on its own */
+    for (int k = 0; k < 2; k++) {
+      vbm_json_opts ho = { sizeof po, &phalf[k] };
+      if (vbm_json_print_tape(&pt, &ho, &b) != VBM_JSON_ARG || vbm_json_escape_string(samp, samp_n, &ho, &b) != VBM_JSON_ARG) fail("an allocator missing one function is not ARG for printing", "alloc", (size_t)k);
+    }
+    {
+      size_t lim = (size_t)LEAN_MAX_SMALL_NAT; vbm_json_tape big = pt;
+      big.nwords = lim / 8 + 1; if (vbm_json_print_tape(&big, NULL, &b) != VBM_JSON_ARG) fail("a tape with more words than the runtime can hold is not ARG", "alloc", 0);
+      big = pt; big.ntext = lim + 1; if (vbm_json_print_tape(&big, NULL, &b) != VBM_JSON_ARG) fail("a tape with more text than the runtime can hold is not ARG", "alloc", 0);
+      if (vbm_json_escape_string(samp, lim + 1, NULL, &b) != VBM_JSON_ARG) fail("a text longer than the runtime can hold is not ARG", "alloc", 0);
+      for (int w = 0; w < 3; w++) if (at_limit_returns_arg(w) != 0) fail("a size AT the limit is refused with ARG (the limit is one too low) or the check could not run", "alloc", (size_t)w);
+    }
     if (vbm_json_print_tape(NULL, NULL, &b) != VBM_JSON_ARG || vbm_json_print_tape(&pt, NULL, NULL) != VBM_JSON_ARG || vbm_json_escape_string(NULL, 3, NULL, &b) != VBM_JSON_ARG || vbm_json_escape_string(samp, 3, NULL, NULL) != VBM_JSON_ARG) fail("bad arguments are not ARG for printing", "alloc", 0);
     vbm_json_tape et = { 0, 0, 0, 0, 0, 0, {0, 0, 0} };
     if (vbm_json_print_tape(&et, NULL, &b) != VBM_JSON_ARG) fail("the empty tape is not refused", "alloc", 0);

@@ -11,12 +11,13 @@ tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 jobs=$(nproc); [ "$jobs" -le 6 ] || jobs=6
 scripts/run-scoped.sh mutants 3600 python3 scripts/mutants.py --jobs "$jobs" > "$tmp/mut.out" || { cat "$tmp/mut.out" >&2; echo "test_mutants: a mutant of the shim survives, or the equivalence list is wrong (docs/mutants.md)" >&2; exit 1; }
 grep -q ' 100.0 over non-equivalent mutants' "$tmp/mut.out" && ran_case || { echo "test_mutants: the mutation score is not 100 over the non-equivalent mutants" >&2; cat "$tmp/mut.out" >&2; exit 1; }
-# NEGATIVE self-tests of the metric: without the real list the three equivalent mutants are survivors and the run FAILS, and a list entry for a mutant the tests KILL is refused (an entry cannot hide one); an entry
+# NEGATIVE self-tests of the metric: without the real list the listed equivalent mutants are survivors and the run FAILS, and a list entry for a mutant the tests KILL is refused (an entry cannot hide one); an entry
 # with no reason, an expired one and a stale id are each rejected
 : > "$tmp/none.txt"
 printf '%b\n' 'abi/vbm_json.c:70:27:>:>=\tThis one is killed by the length-edge case, so the entry must be refused.\t2027-05-04' > "$tmp/hide.txt"   # a list of ONE entry, for a killed mutant
 if scripts/run-scoped.sh mutants 3600 python3 scripts/mutants.py --jobs "$jobs" --allowlist "$tmp/hide.txt" > "$tmp/mut0.out" 2>&1; then echo "test_mutants: self-test: the mutation run passed with the equivalents unlisted (it cannot fail)" >&2; exit 1; fi
-[ "$(grep -c '^SURVIVES' "$tmp/mut0.out")" = 3 ] && ran_case || { echo "test_mutants: self-test: expected exactly the three equivalent mutants to survive" >&2; cat "$tmp/mut0.out" >&2; exit 1; }
+neq=$(grep -cv '^#\|^$' mutants-equivalent.txt)   # one survivor per listed entry (each is in the sample: mutants.py rejects an entry that matches no mutant)
+[ "$(grep -c '^SURVIVES' "$tmp/mut0.out")" = "$neq" ] && ran_case || { echo "test_mutants: self-test: expected exactly the $neq listed equivalent mutants to survive" >&2; cat "$tmp/mut0.out" >&2; exit 1; }
 grep -q 'was KILLED' "$tmp/mut0.out" && ran_case || { echo "test_mutants: self-test: an entry for a killed mutant was not refused" >&2; cat "$tmp/mut0.out" >&2; exit 1; }
 bad_list() {  # bad_list NAME LINE: an equivalence list with that line (after the real entries) must be rejected, with a reason, by a mutants.py that RAN
   { cat mutants-equivalent.txt; printf '%b\n' "$2"; } > "$tmp/bad.txt"
