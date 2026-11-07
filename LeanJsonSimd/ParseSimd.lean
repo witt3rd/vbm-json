@@ -556,6 +556,81 @@ decreasing_by
   rw [usize_add_lit p 8 (by decide) (by omega)]
   omega
 
+/-! ## The string leaf on `USize`
+
+`strBytesW` and the multi-byte check it uses (`mbRun`, `runEnd`) work on boxed `Nat` positions and test each byte of a multi-byte character through a non-inlined `Prop` predicate: a third of the instructions of text with
+non-ASCII characters (the profile of `docs/perf/results.md`, round four). `strBytesV` is `strBytesW` with the run end `runEndU` (plain ASCII words, then well-formed multi-byte characters, all on `USize` with `Bool` tests
+for the continuation bytes), and the run copied by `appendBytes`; `strBytesV_eq` (`LeanJsonProofs/StrU.lean`) says it is `strBytesW`. A byte read past the end of the input is `0` (`getU`), which is no continuation byte, so a
+character that runs past the end is invalid exactly as `decodeUtf8A` says. -/
+
+/-- `Tail`, as a `Bool` (`tailB_eq`). -/
+@[inline] def tailB (b : UInt8) : Bool := 0x80 ≤ b && b ≤ 0xBF
+
+/-- `Second3`, as a `Bool` (`second3B_eq`). -/
+@[inline] def second3B (a b : UInt8) : Bool := tailB b && (a != 0xE0 || 0xA0 ≤ b) && (a != 0xED || b ≤ 0x9F)
+
+/-- `Second4`, as a `Bool` (`second4B_eq`). -/
+@[inline] def second4B (a b : UInt8) : Bool := tailB b && (a != 0xF0 || 0x90 ≤ b) && (a != 0xF4 || b ≤ 0x8F)
+
+/-- Byte `i` of `a`, `0` past the end. -/
+@[inline] def getU (a : ByteArray) (i : USize) : UInt8 := if h : i < a.usize then a.uget i (ugetOk a i h) else 0
+
+/-- The length of the well-formed multi-byte character at `q` whose first byte is `x` (at least `0x80`), `0` when there is none (`mbLenU_eq`). -/
+@[inline] def mbLenU (a : ByteArray) (q : USize) (x : UInt8) : USize :=
+  if 0xC2 ≤ x && x ≤ 0xDF then (if tailB (getU a (q + 1)) then 2 else 0)
+  else if 0xE0 ≤ x && x ≤ 0xEF then (if second3B x (getU a (q + 1)) && tailB (getU a (q + 2)) then 3 else 0)
+  else if 0xF0 ≤ x && x ≤ 0xF4 then (if second4B x (getU a (q + 1)) && tailB (getU a (q + 2)) && tailB (getU a (q + 3)) then 4 else 0)
+  else 0
+
+/-- `mbRun`, on `USize`: from `q`, where a run of plain ASCII bytes stopped, over well-formed multi-byte characters and the plain bytes after them. The guard `q < e ∧ e ≤ q2` (always true when the character is valid: `mbRunU_eq`)
+is what makes the recursion terminate without a proof about the word loop. -/
+def mbRunU (a : ByteArray) (q : USize) : USize :=
+  if h : q < a.usize then
+    if a.uget q (ugetOk a q h) < 0x80 then q
+    else
+      if mbLenU a q (a.uget q (ugetOk a q h)) == 0 then q
+      else
+        if _h2 : q < q + mbLenU a q (a.uget q (ugetOk a q h)) ∧ q + mbLenU a q (a.uget q (ugetOk a q h)) ≤ q + mbLenU a q (a.uget q (ugetOk a q h)) + plainOffU a (q + mbLenU a q (a.uget q (ugetOk a q h))) 0 then
+          mbRunU a (q + mbLenU a q (a.uget q (ugetOk a q h)) + plainOffU a (q + mbLenU a q (a.uget q (ugetOk a q h))) 0)
+        else q
+  else q
+termination_by a.size - q.toNat
+decreasing_by
+  have h1 := USize.lt_iff_toNat_lt.1 (‹_ ∧ _›.1)
+  have h2 := USize.le_iff_toNat_le.1 (‹_ ∧ _›.2)
+  have h5 := ugetOk a q h
+  omega
+
+/-- `runEnd`, on `USize`. -/
+@[inline] def runEndU (a : ByteArray) (i : USize) : USize :=
+  let q := i + plainOffU a i 0
+  if h : q < a.usize then (if a.uget q (ugetOk a q h) < 0x80 then q else mbRunU a q) else q
+
+/-- The end of the run at `i` (`i ≤ a.size`; any other `i` is an empty run): `runEndU`, never before `i` (`runEndG_eq`). -/
+@[inline] def endG (i p0 : Nat) : Nat := if i ≤ p0 then p0 else i
+
+theorem endG_ge (i p0 : Nat) : i ≤ endG i p0 := by
+  unfold endG
+  split <;> omega
+
+@[inline, irreducible] def runEndG (a : ByteArray) (i : Nat) : Nat := endG i (if i ≤ a.size then (runEndU a i.toUSize).toNat else i)
+
+theorem runEndG_ge (a : ByteArray) (i : Nat) : i ≤ runEndG a i := by
+  unfold runEndG
+  exact endG_ge _ _
+
+/-- `strBytesW`, with the run end `runEndG`. -/
+def strBytesV (a : ByteArray) (i : Nat) (b : ByteArray) : Option (ByteArray × Nat) :=
+  let p := runEndG a i
+  let b := if p == i then b else a.copySlice i b b.size (p - i) false
+  if h : p < a.size then
+    if a[p] == 0x22 then some (b, p + 1)
+    else if plainAscii a[p] then strBytesV a (p + 1) (b.push a[p])
+    else decodeCharK a p (fun n j => if p < j then strBytesV a j (pushChar b (Char.ofNat n)) else none) none
+  else none
+termination_by a.size - i
+decreasing_by all_goals (have := runEndG_ge a i; omega)
+
 /-- `strW`, in `USize`. -/
 @[inline] def strU (m : ByteArray) (a : ByteArray) (i : USize) (text : ByteArray) : Option (ByteArray × USize) :=
   if byteIsU a i 0x22 then
@@ -681,7 +756,7 @@ decreasing_by
 @[inline] def strC (a : ByteArray) (i r : USize) (text : ByteArray) : Option (ByteArray × USize) :=
   if byteIsU a i 0x22 then
     if i + 1 + plainOffU a (i + 1) 0 == r && byteIsU a r 0x22 then some (appendBytes text a (i + 1) (r - i - 1), r + 1)
-    else match strBytesW a (i + 1).toNat text with
+    else match strBytesV a (i + 1).toNat text with
       | some (t, j) => if r.toNat == j - 1 then some (t, j.toUSize) else none
       | none => none
   else none

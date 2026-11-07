@@ -1,5 +1,6 @@
 import LeanJsonProofs.ParseU
 import LeanJsonProofs.NumFlag
+import LeanJsonProofs.StrU
 /-! # Proof: `runC` (the structural mask carried as a cursor) answers only what `runU` answers (`runC_sound`)
 
 `LeanJsonSimd/ParseSimd.lean`, `runC`. `CurInv m w b lo` says that the cursor `(w, b)` stands at the position `lo`: `b` is the part of word `w` of the mask that lies at or after `lo`, and no bit of the mask is set between `lo` and the word. Then the
@@ -435,7 +436,11 @@ theorem advK_none {β : Type} (m : ByteArray) (size : USize) (w : USize) (b : UI
   unfold advK
   by_cases h1 : (clearLowest b != 0) = true <;> simp [h1, hk]
 
-theorem strU_C (m a : ByteArray) (i : USize) (text : ByteArray) : strU m a i text = strC a i (skipU m a.usize (i + 1)) text := rfl
+theorem strU_C (m a : ByteArray) (hs : a.size < 2 ^ 26) (i : USize) (text : ByteArray) : strU m a i text = strC a i (skipU m a.usize (i + 1)) text := by
+  have e : ∀ j b, strBytesV a j b = strBytesW a j b := fun j b => strBytesV_eq a hs _ j b rfl
+  unfold strU strC
+  simp only [e]
+  rfl
 
 theorem strC_spec (a : ByteArray) (hs : a.size < 2 ^ 26) (i r : USize) (text t' : ByteArray) (j : USize) (h : strC a i r text = some (t', j)) :
     i.toNat < a.size ∧ r.toNat < a.size ∧ j = r + 1 ∧ j.toNat = r.toNat + 1 := by
@@ -456,6 +461,7 @@ theorem strC_spec (a : ByteArray) (hs : a.size < 2 ^ 26) (i r : USize) (text t' 
       have hr' := (byteIs_spec a _ _ hr).1
       exact ⟨hi, hr', hj.symm, by rw [← hj]; exact add_one a r (by omega) hs⟩
     · simp only [hc, Bool.false_eq_true, ↓reduceIte] at h
+      rw [strBytesV_eq a hs _ _ _ rfl] at h
       cases hb : strBytesW a (i.toNat + 1) text with
       | none => rw [hb] at h; simp at h
       | some tj =>
@@ -594,7 +600,7 @@ theorem runC_sound (a : ByteArray) (hsz : a.size < 2 ^ 26) :
                     apply USize.toNat_inj.mp
                     rw [skipU_eq (stage1 a) a hs31 _ (by rw [hi2]; omega), hi2, hq1]
                   generalize curPosU a.usize w2 b2 = i2 at hk2 hq1 hq2 hq3 hr2 hr2s h e2
-                  rw [strU_C, e2]
+                  rw [strU_C _ _ hsz, e2]
                   cases hsc : strC a i1 i2 text with
                   | none => rw [hsc] at h; simp at h
                   | some tj =>
@@ -638,7 +644,7 @@ theorem runC_sound (a : ByteArray) (hsz : a.size < 2 ^ 26) :
             by_cases h22 : (a[iU.toNat] == 0x22) = true
             · simp only [h22, ↓reduceIte] at h ⊢
               rw [hk] at h
-              rw [strU_C, e1]
+              rw [strU_C _ _ hsz, e1]
               cases hsc : strC a iU i1 text with
               | none => rw [hsc] at h; simp at h
               | some tj =>
@@ -821,7 +827,7 @@ theorem runC_sound (a : ByteArray) (hsz : a.size < 2 ^ 26) :
               apply USize.toNat_inj.mp
               rw [skipU_eq (stage1 a) a hs31 _ (by rw [hi2]; omega), hi2, hq1]
             generalize curPosU a.usize w2 b2 = i2 at hk2 hq1 hq2 hq3 hr2 hr2s h e2'
-            rw [strU_C, e2']
+            rw [strU_C _ _ hsz, e2']
             cases hsc : strC a i1 i2 text with
             | none => rw [hsc] at h; simp at h
             | some tj =>

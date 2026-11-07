@@ -391,3 +391,22 @@ Instructions retired and user cycles per input byte (C ABI, `docs/perf/pc` harne
 | twitter | 631515 | 29.39 | 26.09 | 7.68 | 6.52 | 318.7 | 315.7 |
 
 Stage 1 is now about 4 instructions per byte (round three: 6.8): the shim 1.3, the Lean loop 1.9, the hint 0.5. The closure gate: `spec 48530 | boundary 84 | unverified 0 | specified share 100.00%` (carve-outs: `classify64`, `hasAvx2`, `ctz`, `ld64`, `st64`, `appendBytes`).
+
+## Round four, slice 2: the string leaf on `USize` (`mbRunU`, `runEndU`, `strBytesV`)
+
+After slice 1 the profile of twitter (real text: Japanese, 3-byte characters) was: `runC` 34%, `plainOff` 16% and `mbRun` 14% (the run end of a string with a non-ASCII byte, on boxed `Nat` positions, called by `strBytesW`), `Second3` and `Tail` 3.5% (the `Prop` predicates of the continuation bytes, compiled as non-inlined functions), `strBytesW` 1%; string-heavy (ASCII with `\uXXXX` escapes) 14% `plainOff`, 13.5% `strBytesW`. `strBytesV` (`LeanJsonSimd/ParseSimd.lean`) is `strBytesW` with the run end on `USize`: `runEndU` (the plain-ASCII word loop `plainOffU` of round two, then `mbRunU`), `mbRunU` (the multi-byte check: `mbLenU` is the length of the well-formed character at a position, 0 when there is none, by `Bool` tests `tailB`, `second3B`, `second4B` on bytes read with `getU`, `0` past the end, which is no continuation byte; no `Option`, no pair, no `Nat`). The recursion of `mbRunU` is guarded (`q < e ∧ e ≤ q2`, always true for a valid character) so that it terminates without a lemma about the word loop; `runEndG` keeps the end at or after the start for the termination of `strBytesV`. The proof (`LeanJsonProofs/StrU.lean`): `tailB_iff`, `second3B_iff`, `second4B_iff`; `getU_eq` (a byte read past the end is the `Nat` side's `byteAt` default); `decodeUtf8K_mb` (the continuation-passing decoder at a lead byte consumes exactly `mbLenN` bytes or fails); `mbLenU_eq`, `mbRun_len`, `mbRunU_eq` (an induction on the bytes left, with `plainOffU_eq` of round two for the word loop), `runEndU_eq`, `runEndG_eq`, `strBytesV_eq` (the same loop as `strBytesW`, so `strU_C` and `strC_spec` take `strBytesV = strBytesW` and nothing above them moves).
+
+One variant did not pay and was dropped: skipping the word loop `plainOffU` after a multi-byte character when the next byte is also non-ASCII (a `getU` test and a second recursive call instead of the call): +0.35 instructions per byte on twitter.
+
+Through the same harness as slice 1 (instructions retired and user cycles per input byte, the minimum of 40 parses on CPU 8, **host x load 19 to 26, not quiet**; MB/s of alternated binaries, best of 6 windows of 0.5 s, load 19 to 21: those moved by up to 10% in either direction between runs of identical code, so they are not evidence; the instruction and cycle columns are):
+
+| corpus | bytes | instr/B before | instr/B after | cycles/B before | cycles/B after |
+|---|---|---|---|---|---|
+| canada | 2251051 | 29.59 | 29.59 | 6.61 | 6.47 |
+| citm_catalog | 1727204 | 13.53 | 13.52 | 3.14 | 3.16 |
+| scorecard corpus | 1033424 | 37.19 | 37.19 | 8.26 | 8.21 |
+| small-objects | 2412355 | 56.44 | 56.44 | 12.71 | 12.73 |
+| string-heavy | 2915939 | 25.16 | 23.20 | 6.29 | 5.85 |
+| twitter | 631515 | 26.09 | 20.44 | 6.45 | 5.20 |
+
+Only the corpora with a string that has a non-ASCII byte or an escape (string-heavy, twitter) run the changed code; the others are identical to the instruction. What is left in the string leaf: the escape path of `strBytesV` (`\uXXXX`, the surrogate pair, `\n`: `decodeCharK` on `Nat`, `pushChar` one runtime call per byte) is 25% of string-heavy and is not on `USize` yet.

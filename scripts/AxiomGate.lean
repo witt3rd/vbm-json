@@ -132,8 +132,10 @@ def main (args : List String) : IO UInt32 := do
       for (n, _) in env.constants.map₁.toList do
         let some idx := env.getModuleIdxFor? n | continue
         if ours (env.header.moduleNames[idx.toNat]!).getRoot then oldNames := oldNames.insert n
-      unless oldNames.toList.length == names.size && names.all oldNames.contains do
-        IO.eprintln s!"tier1: the axiom gate checks {names.size} constants but the constants of our modules number {oldNames.toList.length}"; return 1
+      -- a module's data can hold a name another module's data holds too (the equation lemma `foo.eq_1`, generated in each module that unfolds `foo`): the oracle is a set, so compare the distinct names
+      let distinct : NameSet := names.foldl (fun s n => s.insert n) {}
+      unless oldNames.toList.length == distinct.toList.length && names.all oldNames.contains do
+        IO.eprintln s!"tier1: the axiom gate checks {distinct.toList.length} distinct constants but the constants of our modules number {oldNames.toList.length}"; return 1
     let sample := if all then names else (Array.range names.size).filterMap fun i => if i % 40 == 0 then names[i]? else none
     let (real, _) ← (disagree usedOf sample).toIO ctx { env }
     unless real.isEmpty do IO.eprintln s!"tier1: the shared axiom walk and collectAxioms disagree on real constants: {real}"; return 1
