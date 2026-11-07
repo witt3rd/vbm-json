@@ -1,4 +1,5 @@
 import LeanJsonProofs.ParseU
+import LeanJsonProofs.NumFlag
 /-! # Proof: `runC` (the structural mask carried as a cursor) answers only what `runU` answers (`runC_sound`)
 
 `LeanJsonSimd/ParseSimd.lean`, `runC`. `CurInv m w b lo` says that the cursor `(w, b)` stands at the position `lo`: `b` is the part of word `w` of the mask that lies at or after `lo`, and no bit of the mask is set between `lo` and the word. Then the
@@ -722,6 +723,8 @@ theorem runC_sound (a : ByteArray) (hsz : a.size < 2 ^ 26) :
                       · simp [hdl] at h
                     · simp [hc3] at h
                   · simp only [h66, Bool.false_eq_true, ↓reduceIte] at h ⊢
+                    obtain ⟨bad, hK, hbad⟩ := scanNumK_spec a hs31 iU hi
+                    rw [hK] at h
                     by_cases hne : (scanNumU a iU == 0) = true
                     · simp [hne] at h
                     · simp only [hne, Bool.false_eq_true, ↓reduceIte] at h ⊢
@@ -733,12 +736,24 @@ theorem runC_sound (a : ByteArray) (hsz : a.size < 2 ^ 26) :
                         · simp [hlt4] at h
                         · simp only [hlt4, ↓reduceIte] at h
                           have hge : ¬ (i1.toNat < (scanNumU a iU).toNat) := fun h' => hlt4 (USize.lt_iff_toNat_lt.2 h')
-                          unfold appendBytes at h
-                          generalize (if lexOkU a iU (scanNumU a iU) = true then a.copySlice iU.toNat text text.size (scanNumU a iU - iU).toNat false
-                            else pushLex a iU.toNat (scanNumU a iU).toNat text) = text' at h ⊢
-                          obtain ⟨pe2, -, pe4⟩ := pnU a hsz tape tw (by omega) htape (hdrW 3 (text'.size - text.size)) (UInt64.ofNat text.size)
-                          exact ih (fu - 1) w1 b1 i1 (scanNumU a iU) true _ (tw + 2) text' fst d t hf1 hjb (by rw [pe3]; omega) (by rw [pe2, pe3]; exact pe4) hd
-                            (rel_mono a (stage1 a) hM hsz w1 b1 i1 _ _ hr1 (by omega) (by omega) (by omega)) (fun h => by simp at h) h
+                          have hlex := hbad hne
+                          by_cases hbd : bad = true
+                          · have hnl : ¬ lexOkU a iU (scanNumU a iU) = true := fun hh => by have := hlex.1 hh; simp [hbd] at this
+                            simp only [hbd, ↓reduceIte] at h
+                            simp only [hnl, Bool.false_eq_true, ↓reduceIte]
+                            generalize pushLex a iU.toNat (scanNumU a iU).toNat text = text' at h ⊢
+                            obtain ⟨pe2, -, pe4⟩ := pnU a hsz tape tw (by omega) htape (hdrW 3 (text'.size - text.size)) (UInt64.ofNat text.size)
+                            exact ih (fu - 1) w1 b1 i1 (scanNumU a iU) true _ (tw + 2) text' fst d t hf1 hjb (by rw [pe3]; omega) (by rw [pe2, pe3]; exact pe4) hd
+                              (rel_mono a (stage1 a) hM hsz w1 b1 i1 _ _ hr1 (by omega) (by omega) (by omega)) (fun h => by simp at h) h
+                          · have hbf : bad = false := by simpa using hbd
+                            have hl : lexOkU a iU (scanNumU a iU) = true := hlex.2 hbf
+                            simp only [hbf, Bool.false_eq_true, ↓reduceIte] at h
+                            simp only [hl, ↓reduceIte]
+                            unfold appendBytes at h
+                            generalize a.copySlice iU.toNat text text.size (scanNumU a iU - iU).toNat false = text' at h ⊢
+                            obtain ⟨pe2, -, pe4⟩ := pnU a hsz tape tw (by omega) htape (hdrW 3 (text'.size - text.size)) (UInt64.ofNat text.size)
+                            exact ih (fu - 1) w1 b1 i1 (scanNumU a iU) true _ (tw + 2) text' fst d t hf1 hjb (by rw [pe3]; omega) (by rw [pe2, pe3]; exact pe4) hd
+                              (rel_mono a (stage1 a) hM hsz w1 b1 i1 _ _ hr1 (by omega) (by omega) (by omega)) (fun h => by simp at h) h
                       · simp [hdl] at h
       · simp only [hlt, ↓reduceDIte] at h
         simp at h

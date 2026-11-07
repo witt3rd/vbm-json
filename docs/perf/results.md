@@ -320,3 +320,20 @@ Through the C ABI as before (A = main at `5759575`, B = this slice; best of 12 r
 | small-objects | 2412355 | 223.9 | 258.0 | 1.15 |
 | string-heavy | 2915939 | 508.9 | 532.1 | 1.05 |
 | twitter | 631515 | 477.0 | 492.2 | 1.03 |
+
+## Round three, slice 5: the number lexeme's flag from two bytes (`scanNumK`), no second pass (`lexOkU`)
+
+After slice 4 the profile (the sampler of `docs/perf/prof.c` on the tree of `529b0ea`, host x) had `lexOkU` at 11.5% of canada and 5.8% of the scorecard corpus: the check that the lexeme of a number has no `E` and no `+` (so that it can be copied from the input and not rewritten by `pushLex`), a second pass over the bytes the scan had just read. `scanNumK` (`LeanJsonSimd/ParseSimd.lean`, continuation-passing) returns the end of the number and the flag from two bytes at the end of the fraction: those bytes can only be in the exponent, whose letter is `E`, or `e` followed by `+`. `runC` copies the lexeme (`appendBytes`) when the flag is false and rewrites it (`pushLex`) otherwise. The proof (`LeanJsonProofs/NumFlag.lean`): the integer and fraction parts are digits, `-` and `.` (`scanInt_lex`, `scanFrac_lex`, `scanDigits1_lex`: the proofs of the `NumRun` lemmas of `ParseSimd.lean` over the stronger byte predicate `lexByte`), `exp_lex` (the exponent part has no `E` and no `+` exactly when the flag read at its first bytes is false: the letter, the optional sign and the digits), and `scanNumK_spec`: the flag is false exactly when `lexOkU` is true, so `runC_sound` takes the two branches for the ones of `runU` (`lexOkU` itself is no longer called by the export).
+
+Measured by **instructions retired per input byte and (user) cycles per input byte** (`perf_event_open` on the P core, the minimum of 15 parses of one run through the C ABI; the instruction count does not depend on the load, the cycle count does: host x was saturated by other tenants, load 25 to 60, during this measurement, and every wall-clock rate taken then was meaningless), three trees built from the same host: START = `b689b52` (the start of round three), A = main after slice 4 (`529b0ea`), B = this slice:
+
+| corpus | START instr/B | START cycles/B | A instr/B | A cycles/B | B instr/B | B cycles/B | B / A (instr) |
+|---|---|---|---|---|---|---|---|
+| canada | 40.56 | 10.70 | 36.91 | 7.93 | 32.92 | 6.95 | 0.89 |
+| citm_catalog | 21.69 | 7.83 | 17.05 | 4.20 | 16.86 | 5.35 | 0.99 |
+| scorecard corpus | 50.73 | 13.19 | 41.52 | 12.59 | 40.52 | 12.87 | 0.98 |
+| small-objects | 74.87 | 25.19 | 58.91 | 16.56 | 59.77 | 15.95 | 1.01 |
+| string-heavy | 31.71 | 10.97 | 27.79 | 7.25 | 28.35 | 8.25 | 1.02 |
+| twitter | 43.06 | 13.77 | 29.18 | 8.06 | 29.39 | 7.03 | 1.01 |
+
+The gain is where the numbers are: canada 11% fewer instructions (and, in the cycles that this load allowed, 12% fewer). The corpora without long numbers move by 1 to 2% in instructions either way (string-heavy has no number at all: the 2% is the code layout of the larger loop, which the cycle minimum over 40 parses puts at 2%); the cycle columns of the other rows are the noise of the shared host (citm_catalog 4.20 to 5.35 with fewer instructions). The earlier alternation measurements of this slice's first version (a flag from the exponent letter alone, no proof) gave canada +5 to +7%, the others within the noise.

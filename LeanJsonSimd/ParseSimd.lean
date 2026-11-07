@@ -532,6 +532,14 @@ decreasing_by
   let r2 := scanFracU a r1
   if r2 == 0 then 0 else scanExpU a r2
 
+/-- `scanNumU` with a flag, in continuation-passing style: `k` takes the end (`0` for no number) and whether the lexeme has an `E` or a `+` (so that its canonical form is not the input). Those bytes can only be in the exponent: the
+exponent letter is `E`, or it is `e` and the byte after it is `+`; the flag is read from those two bytes at the end of the fraction, not by a second pass over the lexeme (`scanNumK_spec`, `LeanJsonProofs/NumFlag.lean`). -/
+@[inline] def scanNumK {β : Type} (a : ByteArray) (i : USize) (k : USize → Bool → β) : β :=
+  let r1 := scanIntU a (if byteIsU a i 0x2D then i + 1 else i)
+  if r1 == 0 then k 0 false else
+  let r2 := scanFracU a r1
+  if r2 == 0 then k 0 false else k (scanExpU a r2) (byteIsU a r2 0x45 || (byteIsU a r2 0x65 && byteIsU a (r2 + 1) 0x2B))
+
 /-- `lexOk`, in `USize`. -/
 def lexOkU (a : ByteArray) (p e : USize) : Bool :=
   if h : p ≤ e ∧ 8 ≤ e - p then (if lexBad (ld64 a p) == 0 then lexOkU a (p + 8) e else false)
@@ -728,11 +736,11 @@ def runC (m : ByteArray) (f : USize) (a : ByteArray) (w : USize) (b : UInt64) (i
           if delimAtU a (i + 5) then advK m sz w b fun w1 b1 i1 => if i1 < i + 5 then none else runC m f1 a w1 b1 i1 true (putNodeU tape tw (hdrW 1 0) 0) (tw + 2) text fst d else none
         else none
       else
-        let j := scanNumU a i
+        scanNumK a i fun j bad =>
         if j == 0 then none
         else if delimAtU a j then
           let o := text.size
-          let text' := if lexOkU a i j then appendBytes text a i (j - i) else pushLex a i.toNat j.toNat text
+          let text' := if bad then pushLex a i.toNat j.toNat text else appendBytes text a i (j - i)
           advK m sz w b fun w1 b1 i1 => if i1 < j then none else
           runC m f1 a w1 b1 i1 true (putNodeU tape tw (hdrW 3 (text'.size - o)) (UInt64.ofNat o)) (tw + 2) text' fst d
         else none
