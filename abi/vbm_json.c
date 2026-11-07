@@ -23,7 +23,7 @@ _Static_assert(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__, "the tape is little-en
 
 lean_object *vbm_json_parse_tape(lean_object *input);     /* the Lean export (LeanJsonSimd/ParseSimd.lean: parseTapeSimd) */
 lean_object *initialize_vbm_x2djson_LeanJsonSimd_ParseSimd(uint8_t builtin);   /* Lean 4.35 names it package_Module; it also initialises the runtime and Init */
-lean_object *vbm_json_lean_print_tape(lean_object *words, lean_object *text);   /* the Lean exports of LeanJsonSimd/PrintSimd.lean (print) and LeanJson/PrintTape.lean (escape): the JSON bytes, or no bytes for a refused tape */
+lean_object *vbm_json_lean_print_tape(lean_object *words, lean_object *text);   /* the Lean exports of LeanJsonSimd/PrintSimd.lean (print and escape): the JSON bytes, or no bytes for a refused tape */
 lean_object *vbm_json_lean_escape_string(lean_object *text);                    /* the string literal, or no bytes for text that is not valid UTF-8 */
 lean_object *initialize_vbm_x2djson_LeanJsonSimd_PrintSimd(uint8_t builtin);
 

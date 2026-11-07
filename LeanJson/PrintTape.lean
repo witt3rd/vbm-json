@@ -188,8 +188,4 @@ def printTape (w x : ByteArray) : Option ByteArray := printTapeG ldw pleaf w x
 def escapeChecked (a : ByteArray) : Option ByteArray :=
   if utf8Range a 0 a.size then some (escapeString a) else none
 
-/-- The export `vbm_json_lean_escape_string` (called by `vbm_json_escape_string`): the string literal, or no bytes for text that is not valid UTF-8 (a literal is never empty). -/
-@[export vbm_json_lean_escape_string]
-def escapeStringExport (a : ByteArray) : ByteArray := (escapeChecked a).getD ByteArray.empty
-
 end LeanJson

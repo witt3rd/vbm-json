@@ -522,4 +522,14 @@ theorem printTapeS_eq (w x : ByteArray) : printTapeS w x = printTape w x := by
   rw [this, h2]
 
 
+theorem escapeCheckedS_eq (a : ByteArray) : escapeCheckedS a = escapeChecked a := by
+  unfold escapeCheckedS escapeChecked escapeString
+  have hU : utf8RangeS a 0 a.size = utf8Range a 0 a.size := utf8RangeS_eq a a.size a.size 0 (by simp)
+  have hE := fun b => escLoopRS_eq a a.size a.size 0 b (by simp)
+  have hR := fun b => escLoopR_eq a a.size (Nat.le_refl _) a.size 0 b (by simp)
+  have hL := fun b => escLoop_eq a 0 b
+  have hT : ((L a).drop 0).take (a.size - 0) = a.data.toList.drop 0 := by
+    rw [Nat.sub_zero, List.drop_zero, List.drop_zero, size_L, List.take_length]; rfl
+  simp only [hU, hE, hR, hL, hT]
+
 end LeanJsonProofs

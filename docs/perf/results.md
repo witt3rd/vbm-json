@@ -513,3 +513,34 @@ The specified share, last line of the closure gate on the final tree: `closure g
 ### The ceiling, stated honestly
 
 With verified Lean and tiny primitives (a load, a store, a count, a vector compare, a short copy), the remedies (i) to (v) are worth together about 20 to 25% of the instructions: the scorecard corpus from 7.4 to about 6, canada from 5.2 to about 4.2, citm_catalog from 2.7 to about 2.2, twitter and string-heavy from 5 to about 4. That is where this design stops: **a hand-written parser of the simdjson class does 1 to 2 cycles per byte, and the remaining factor of 3 to 4 is the token loop itself, which Lean's emitted C cannot approach** (every token is tens of operations on boxed or checked values, every store and every cursor step a call or a guarded sequence; the compiler does not see through them). Closing it takes the trusted kernel the owner has not approved; the proofs and the primitives built here (the cursor, the stacks, the leaves on `USize`) are what such a kernel would be checked against.
+
+## The printer, round five: words, runs and one load (printer slices 5 to 8)
+
+Four landed slices, each with its equation to the printer it replaces (`printTape_encode`, `escapeChecked_eq`, `printBytes_eq`, `escapeString_eq` are unchanged theorems; no new axiom; no gate, check or lint added):
+
+1. `printTapeG` (`LeanJson/PrintTape.lean`): the printer is generic in the word load `ld` and the leaf writer `lf` (`@[specialize]`: the emitted C is the same as before, instruction for instruction); `printTape` is `printTapeG ldw pleaf`; the proofs of `printTape_encode` needed only the extra arguments. (`479076e`)
+2. `LeanJsonSimd/PrintSimd.lean`: the export runs `printTapeS = printTapeG ldwS pleaf`; `ldwS` is one `VbmSimd.ld64` (`ldwS_eq`: the little-endian word with `|||` is `ldw`'s sum of the same eight shifted bytes, `ors_eq`). First try 1.8 times slower: a literal 2^32 in the guard is a big number to the Lean compiler (`lean_cstr_to_nat` per call); the guard is `size / 65536 < 65536`.
+3. The texts a word at a time (`e39d154`): `runS flag tl x i e`, the end of a run found eight bytes at a time (`ld64`, `ctz` of the first flagged lane; the word may overhang the range: the overhang reads as zero, which both flags report); `plainEndS` (`escFlag`: below 0x20, quote, backslash), `scanDigS` (`ndFlags`), `utf8RangeS` (eight ASCII bytes at once), `numLexS`, `escLoopRS`, `pleafS` are `plainEnd`, `scanDig`, `utf8Range`, `numLex`, `escLoopR`, `pleaf` with those. `runS_eq` is proved once for any flag whose lanes are exact (`escFlag_lane`, `ndFlags_lane`) against `runEnd P`; `@[specialize]` on `runS` matters (without it the flag is a closure on boxed words: 1.5 times slower than before).
+4. A lexeme that passed `numLex` is copied whole (`ea4740a`): `numLex_allC` (every byte of an accepted lexeme is a digit, `-`, `+`, `.`, `e` or `E`, from `numSign_props`, `numInt_props`, `numFrac_props`, `numExp_props`) and `escLoopR_plain` (a run with no byte to escape is one `copySlice`): the second pass over a number is gone. `ldwS` tests `i + 1 ≤ size >>> 3` (no multiplication).
+5. The export `vbm_json_escape_string` runs `escapeCheckedS` (`escapeCheckedS_eq`): the UTF-8 check a word at a time, then `escLoopRS`; it was the per-byte `escLoop` with `pushEsc` and a `Nat` loop.
+
+Measured by `docs/perf/printbench.c` through the C ABI, host x, CPU 8, tree before = `72cbc66`-era printer (`8c8831b`), after = `ea4740a` (slices 1 to 4). Instructions and cycles per **output** byte are the minimum of 41 calls; MB/s are of the output, the median of 5 windows of 0.6 s. **Host x load 18 to 22 (shared; the base and the new binary alternate on each corpus, so each pair saw the same load)**. The instruction count does not depend on the load.
+
+| corpus | output bytes | instr/B before | instr/B after | cycles/B before | cycles/B after | MB/s before | MB/s after | speedup (MB/s) |
+|---|---|---|---|---|---|---|---|---|
+| canada | 2251027 | 90.0 | 44.2 | 16.7 | 8.2 | 138 | 283 | 2.04 |
+| citm_catalog | 500299 | 110.0 | 71.6 | 19.9 | 13.6 | 120 | 163 | 1.36 |
+| scorecard corpus | 933425 | 113.9 | 75.7 | 21.2 | 14.9 | 106 | 150 | 1.42 |
+| small-objects | 2412355 | 146.4 | 109.6 | 26.4 | 21.3 | 78 | 87 | 1.12 |
+| string-heavy | 2785939 | 63.5 | 36.0 | 14.1 | 7.7 | 177 | 220 | 1.24 |
+| twitter | 466906 | 73.7 | 50.8 | 22.0 | 13.8 | 77 | 107 | 1.39 |
+
+`vbm_json_escape_string` (the document's bytes as text; MB/s of input, host load 25 to 29, alternating): canada 139 to 567, citm_catalog 118 to 345, scorecard corpus 142 to 225, small-objects 121 to 138, string-heavy 152 to 304, twitter 132 to 222 (the shim's copy of the text into the runtime is in these numbers).
+
+The specified share on the final tree: `closure gate: spec 68998 | boundary 84 | unverified 0 | total 68998 | specified share 100.00% (floor 100.00%)`; carve-outs unchanged (`VbmSimd.ld64`, `ctz` are the only primitives the new code uses; no new primitive, no new trusted code); axiom gate: 5751 constants, 0 offending; hosted CI of `main` green after slices 1 to 3 (arm64 included).
+
+### The class, and the ceiling
+
+The class the parser rounds found holds here too: per-byte loops on boxed `Nat` positions, one read per byte, a second pass over what the first pass already checked. Three of its four forms are gone from the printer (the word read of the tape, the word-at-a-time text, the second pass over a number); the fourth (positions and counters on `USize`) is not taken: `pnode`, `pelems`, `pmembers` still count words and index the tape in `Nat` (a `lean_nat_mul` with an overflow test per node), and the proof of `pnode_eq` would have to follow. What is left, by the sampler on small-objects (a short key and a short value per member, 12 output bytes): the tape word loads 22% (`ldwS`: the `Nat` index and guard around one load, and the cache miss of the first touch of the tape), `lean_byte_array_push` 14% (the comma, the colon, the quotes, the brackets: one call each), the node loop 9%, `pleafS` 8%, the copy of a run 7% (`copySlice`), the word loops of a four-byte string 12%. Capacity was already one allocation (`x.size + w.size / 4 + 16`), no doubling appears in the profile, and there is no `Option` or pair per character.
+
+The ceiling with verified Lean and the two primitives (`ld64`, `ctz`): about 1.3 to 1.5 times the numbers above on the corpora of short strings (small-objects, scorecard corpus, citm_catalog) by putting the node loop on `USize` and pushing the punctuation with one store (a `st64`-style primitive for the two to three bytes between nodes), and 1.1 times on canada and string-heavy, which are now copy- and word-loop-bound (7.7 to 8.2 cycles per output byte). A hand-written printer does 1 to 2 cycles per output byte; the remaining factor of 4 to 5 is the per-node cost of code Lean compiles through boxed `Nat` and checked array operations, the same wall as the parser's token loop.

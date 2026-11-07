@@ -104,6 +104,14 @@ def pleafS (x : ByteArray) (h aux : UInt64) (b : ByteArray) : ByteArray :=
     else ByteArray.empty
   else ByteArray.empty
 
+/-- The string literal of `a` when `a` is valid UTF-8 (`escapeChecked`), the check and the escape a word at a time. -/
+def escapeCheckedS (a : ByteArray) : Option ByteArray :=
+  if utf8RangeS a 0 a.size then some ((escLoopRS a 0 a.size ((ByteArray.emptyWithCapacity (a.size + 2)).push 0x22)).push 0x22) else none
+
+/-- The export `vbm_json_lean_escape_string` (called by `vbm_json_escape_string`): the string literal, or no bytes for text that is not valid UTF-8 (a literal is never empty). -/
+@[export vbm_json_lean_escape_string]
+def escapeStringExport (a : ByteArray) : ByteArray := (escapeCheckedS a).getD ByteArray.empty
+
 /-- The compact JSON of the tape `(w, x)` (`printTape`), the words read by `ld64`, the texts a word at a time. -/
 def printTapeS (w x : ByteArray) : Option ByteArray := printTapeG ldwS pleafS w x
 
