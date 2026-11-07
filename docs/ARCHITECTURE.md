@@ -43,4 +43,4 @@ vbm-json is one Lean program with one proof, projected onto several languages. N
 | vectors and differential tests | the fast parser, the native library, the WebAssembly module and every binding agree with the reference on every vector |
 | Tier 2 | `leanchecker` and the independent `nanoda` re-check every declaration |
 
-Every gate runs a negative self-test in the same run, to show it can fail. Decisions and their reasons: [`decisions/`](decisions/). What is trusted and why: [`TRUST.md`](TRUST.md).
+The mutation metric (`scripts/test_mutants.sh`, Tier 2) shows the tests can fail. Decisions and their reasons: [`decisions/`](decisions/). What is trusted and why: [`TRUST.md`](TRUST.md).
