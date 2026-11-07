@@ -21,7 +21,7 @@ lean_lib LeanJson where
 header (static inline loads, stores and ctz) first in every generated C file. It holds the export `vbm_json_parse_tape` (`parseTapeSimd`). -/
 lean_lib LeanJsonSimd where
   globs := #[.andSubmodules `LeanJsonSimd]
-  moreLeancArgs := #["-include", (__dir__ / ".lake" / "packages" / "vbm-simd" / "include" / "vbm_simd.h").toString]
+  moreLeancArgs := #["-fno-builtin-memset", "-include", (__dir__ / ".lake" / "packages" / "vbm-simd" / "include" / "vbm_simd.h").toString]
 
 /-- The proofs: may import `Std` and `Lean`; NEVER linked (nothing in `LeanJson` may import it, and no executable or export depends on it). -/
 lean_lib LeanJsonProofs where
