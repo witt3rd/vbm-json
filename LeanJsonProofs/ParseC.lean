@@ -733,6 +733,7 @@ theorem runC_sound (a : ByteArray) (hsz : a.size < 2 ^ 26) :
                         · simp [hlt4] at h
                         · simp only [hlt4, ↓reduceIte] at h
                           have hge : ¬ (i1.toNat < (scanNumU a iU).toNat) := fun h' => hlt4 (USize.lt_iff_toNat_lt.2 h')
+                          unfold appendBytes at h
                           generalize (if lexOkU a iU (scanNumU a iU) = true then a.copySlice iU.toNat text text.size (scanNumU a iU - iU).toNat false
                             else pushLex a iU.toNat (scanNumU a iU).toNat text) = text' at h ⊢
                           obtain ⟨pe2, -, pe4⟩ := pnU a hsz tape tw (by omega) htape (hdrW 3 (text'.size - text.size)) (UInt64.ofNat text.size)

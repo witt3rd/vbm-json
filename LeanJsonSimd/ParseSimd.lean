@@ -1,6 +1,7 @@
 import LeanJson.Tape
 import LeanJsonSimd.Stage1
 import VbmSimd.Cursor
+import VbmSimd.Append
 /-! # `LeanJsonSimd.ParseSimd`: the index-driven parser (stage 2 of the bit-parallel parser), with a verified-sound fallback
 
 `docs/perf/simd-plan.md`. `runI` is `runT` (`LeanJson/Tape.lean`) with one change: the whitespace between tokens is not scanned byte by byte but skipped by asking the structural mask of stage 1 (`LeanJson.Stage1.stage1`) for the next
@@ -671,7 +672,7 @@ decreasing_by
 /-- `strU` with the position `r` of the first structural byte after the opening quote given (the cursor's). -/
 @[inline] def strC (a : ByteArray) (i r : USize) (text : ByteArray) : Option (ByteArray × USize) :=
   if byteIsU a i 0x22 then
-    if i + 1 + plainOffU a (i + 1) 0 == r && byteIsU a r 0x22 then some (a.copySlice (i + 1).toNat text text.size (r - i - 1).toNat false, r + 1)
+    if i + 1 + plainOffU a (i + 1) 0 == r && byteIsU a r 0x22 then some (appendBytes text a (i + 1) (r - i - 1), r + 1)
     else match strBytesW a (i + 1).toNat text with
       | some (t, j) => if r.toNat == j - 1 then some (t, j.toUSize) else none
       | none => none
@@ -731,7 +732,7 @@ def runC (m : ByteArray) (f : USize) (a : ByteArray) (w : USize) (b : UInt64) (i
         if j == 0 then none
         else if delimAtU a j then
           let o := text.size
-          let text' := if lexOkU a i j then a.copySlice i.toNat text o (j - i).toNat false else pushLex a i.toNat j.toNat text
+          let text' := if lexOkU a i j then appendBytes text a i (j - i) else pushLex a i.toNat j.toNat text
           advK m sz w b fun w1 b1 i1 => if i1 < j then none else
           runC m f1 a w1 b1 i1 true (putNodeU tape tw (hdrW 3 (text'.size - o)) (UInt64.ofNat o)) (tw + 2) text' fst d
         else none

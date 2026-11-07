@@ -288,3 +288,20 @@ Through the C ABI as before (A = main at `ca2edaa`, B = this slice; best of 3 ro
 | twitter | 631515 | 410.4 | 489.7 | 1.19 |
 
 Only twitter (real text: Japanese, 3-byte characters) runs the changed path (the other rows' differences are the noise of the machine). Repeated at a load of 6 to 22 (another tenant busy on the host; absolute numbers halved, ratios are the information): twitter 1.34 and 1.37, every other row between 0.96 and 1.08.
+
+## Round three, slice 3: the short text copy (`appendBytes`, a new trusted primitive in vbm-simd)
+
+After slice 1 the text of every string without an escape and of every number was copied from the input into the text region by the runtime's `copySlice` (a call, an exclusiveness and a capacity check, then `memcpy`: about 40 cycles for a few bytes). `appendBytes` (vbm-simd `VbmSimd/Append.lean`, clause VS-13, trust-ledger entry T13 there and in the paragraph "The short append" of T14 here; landed in vbm-simd as `54ab2fb`, `5aeb353`, `77e145f`) appends `a[i, i + n)` to a byte array: for at most 32 bytes, an unshared destination with room in its capacity and a run inside the source it moves the run with two overlapping pairs of 8-byte loads and stores (16 to 32 bytes; 8, 4, 2, 1 bytes at each end below) and sets the size; in every other case it is the runtime's `copySlice` (so its Lean body, the model, is `copySlice`: `appendBytes_spec` in vbm-simd, and `runC_sound` takes it for the call it replaces by `rfl`). The C is tested in vbm-simd against the model (about 160000 comparisons on an unshared and a shared destination; the predicate that decides the fast path against its plain statement at the edges of `size_t`; the moves with source and destination against unmapped pages) and by eleven deliberate mutants. It is listed in `scripts/carveouts.txt` (`VbmSimd.appendBytes`, T14): the closure gate line is `spec 47790 | boundary 76 | unverified 0 | specified share 100.00% (floor 100.00%)`. `runC` uses it for the string text (`strC`) and the number lexeme; the slow path (`strBytesW`) still uses the runtime's call.
+
+Two things the measurement taught. The first version moved up to 16 bytes, and canada, whose numbers are 17 to 20 bytes, took the runtime path through the extra checks and ran slower; the limit is 32. And with `vbm_simd_append` a `static inline` function the loop, which uses it at several sites, was slower on canada (0.96) than with the runtime call; `noinline` made it faster on every row.
+
+Through the C ABI as before (A = main at `3affd0c`, B = this slice; best of 12 rounds of one window of 0.2 s, **pinned to CPU 8 of host x (a P core whose hyperthread sibling and neighbours were idle; CPU 2, used in the earlier tables of this round, has a sibling that another tenant kept at 93%), load 7.1 before and 4.0 after**):
+
+| corpus | bytes | MB/s A | MB/s B | B / A |
+|---|---|---|---|---|
+| canada | 2251051 | 522.4 | 549.6 | 1.05 |
+| citm_catalog | 1727204 | 1038.1 | 1108.5 | 1.07 |
+| scorecard corpus | 1033424 | 389.3 | 432.8 | 1.11 |
+| small-objects | 2412355 | 247.0 | 274.1 | 1.11 |
+| string-heavy | 2915939 | 589.8 | 602.1 | 1.02 |
+| twitter | 631515 | 578.1 | 603.3 | 1.04 |
