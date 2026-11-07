@@ -55,6 +55,8 @@ int main(void) {
 cc -I include example.c OUT/libvbm_json.a -o example
 ```
 
+To write JSON, `vbm_json_print_tape(&t, NULL, &out)` prints a parsed tape back as compact bytes (`out.data`, `out.len`; release with `vbm_json_bytes_free(&out)`), and `vbm_json_escape_string(utf8, len, NULL, &out)` gives the quoted, escaped string literal of UTF-8 text you already hold; both are the verified printer's bytes.
+
 Error codes: `VBM_JSON_SYNTAX` (not valid), `VBM_JSON_DEPTH` (nested deeper than 512), `VBM_JSON_NOMEM`, `VBM_JSON_ARG`, `VBM_JSON_INTERNAL`. On any error nothing is allocated and nothing needs freeing.
 
 ### WebAssembly

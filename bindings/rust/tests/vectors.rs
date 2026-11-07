@@ -1,6 +1,6 @@
 // The Rust binding against the Lean reference: every row of the shared vectors (vbm-json-vectors-1; the JSONTestSuite files are set `jts`). A driver: it holds no input of its own (the deep, duplicate-key, lexeme and empty inputs are rows of the generated set); not part of the binding.
 // VBM_JSON_VECTORS = the vectors.jsonl path (scripts/test_bindings.sh). An accepted input must parse and print (here) to the reference's canonical bytes; a rejected one must be the reference's code.
-use vbm_json::{parse, Error, Value};
+use vbm_json::{compact, escape_string, parse, Error, Value};
 
 fn field<'a>(line: &'a str, key: &str) -> Option<&'a str> {
     let pat = format!("\"{}\":\"", key);
@@ -36,6 +36,8 @@ fn canon(v: &Value, o: &mut Vec<u8>) {
     }
 }
 
+fn input_text(v: &Value) -> Vec<u8> { match v { Value::String(s) => s.as_bytes().to_vec(), _ => unreachable!() } }
+
 #[test]
 fn shared_vectors() {
     let path = std::env::var("VBM_JSON_VECTORS").expect("VBM_JSON_VECTORS: the vectors.jsonl path");
@@ -52,6 +54,8 @@ fn shared_vectors() {
                 assert_eq!(verdict, "ok", "{}: expected an error, but it parsed", id);
                 let mut o = Vec::new(); canon(&v, &mut o);
                 assert_eq!(hex(&o), field(line, "canonical").unwrap(), "{}: canonical form differs", id);
+                assert_eq!(hex(&compact(&input).unwrap()), field(line, "canonical").unwrap(), "{}: compact() differs from the canonical form", id);
+                if let Value::String(_) = v { assert_eq!(hex(&escape_string(&input_text(&v)).unwrap()), field(line, "canonical").unwrap(), "{}: escape_string differs", id); }
                 ok += 1;
             }
             Err(e) => {
@@ -62,5 +66,6 @@ fn shared_vectors() {
             }
         }
     }
+    assert_eq!(escape_string(&[0xff]), Err(Error::Syntax), "escape_string accepted a byte that is not UTF-8");
     println!("vectors: {} rows ({} from the JSONTestSuite): {} accepted and read back to the canonical form, {} errors with the reference's code", rows, jts, ok, errs);
 }

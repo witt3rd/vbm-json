@@ -72,6 +72,34 @@ pub fn parse(input: &[u8]) -> Result<Value, Error> {
     Ok(v)
 }
 
+struct BytesGuard(vbm_json_bytes);
+impl Drop for BytesGuard {
+    fn drop(&mut self) { unsafe { vbm_json_bytes_free(&mut self.0) } }
+}
+
+fn take(g: &BytesGuard) -> Vec<u8> {
+    if g.0.len == 0 { Vec::new() } else { unsafe { std::slice::from_raw_parts(g.0.data, g.0.len) }.to_vec() }
+}
+
+/// Parse `input` (as `parse`) and print the tape back with the library's printer: the compact form (no whitespace, numbers as their lexeme, strings escaped minimally).
+pub fn compact(input: &[u8]) -> Result<Vec<u8>, Error> {
+    let mut g = Guard(unsafe { std::mem::zeroed() });
+    let rc = unsafe { vbm_json_parse(input.as_ptr(), input.len(), std::ptr::null(), &mut g.0) };
+    if rc != VBM_JSON_OK { return Err(Error::from_code(rc)); }
+    let mut o = BytesGuard(unsafe { std::mem::zeroed() });
+    let rc = unsafe { vbm_json_print_tape(&g.0, std::ptr::null(), &mut o.0) };
+    if rc != VBM_JSON_OK { return Err(Error::from_code(rc)); }
+    Ok(take(&o))
+}
+
+/// The JSON string literal (quotes included) of the UTF-8 text: the library's escaping. `Error::Syntax` for bytes that are not valid UTF-8.
+pub fn escape_string(text: &[u8]) -> Result<Vec<u8>, Error> {
+    let mut o = BytesGuard(unsafe { std::mem::zeroed() });
+    let rc = unsafe { vbm_json_escape_string(text.as_ptr(), text.len(), std::ptr::null(), &mut o.0) };
+    if rc != VBM_JSON_OK { return Err(Error::from_code(rc)); }
+    Ok(take(&o))
+}
+
 fn node(w: &[u64], text: &[u8], i: usize) -> Result<(Value, usize), Error> {
     if i + TAPE_NODE_WORDS > w.len() { return Err(Error::Internal); }
     let (head, aux) = (w[i], w[i + 1]);

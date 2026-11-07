@@ -43,7 +43,9 @@ def main():
         if r["verdict"] != "ok": sys.exit("test_python: %s: expected error %s, but it parsed" % (where, r.get("code")))
         if canon(v).hex() != r["canonical"]: sys.exit("test_python: %s: canonical form differs: %s vs %s" % (where, canon(v).hex(), r["canonical"]))
         ok += 1
+        if vbm_json.compact(data).hex() != r["canonical"]: sys.exit("test_python: %s: compact() differs from the canonical form" % where)
         if len(rows_sample) < 2000: rows_sample.append(r)
+        if isinstance(v, str) and vbm_json.escape_string(v) != bytes.fromhex(r["canonical"]): sys.exit("test_python: %s: escape_string() differs from the canonical form" % where)
     # the binding's own API, checked on the generated rows (no input of its own): number= maps a lexeme, Error.code is the ABI code of the reference's code name
     seen = []
     for r in rows_sample:
@@ -51,6 +53,17 @@ def main():
         assert canon(vbm_json.parse(data, number=lambda s: (seen.append(s), Number(s))[1])) == bytes.fromhex(r["canonical"]), "test_python: number= differs from the default on " + r["set"]
     assert seen and all(isinstance(x, str) for x in seen), "test_python: number= was never called with a lexeme"
     assert sorted(codes) == ["depth", "syntax"] and all(isinstance(e, vbm_json.Error) and e.code == {"syntax": 1, "depth": 2}[n] for n, e in codes.items()), codes
+    bad = 0
+    for r in rows_sample[:500]:   # escape_string on the (arbitrary) input bytes: valid UTF-8 is the literal, anything else JSONSyntaxError (Python's strict decoder decides)
+        b = bytes.fromhex(r["input"])
+        try: b.decode("utf-8"); valid = True
+        except UnicodeDecodeError: valid = False
+        if valid: assert vbm_json.escape_string(b) == canon(b.decode("utf-8")), "test_python: escape_string differs from the escape table"
+        else:
+            try: vbm_json.escape_string(b); sys.exit("test_python: escape_string accepted bytes that are not UTF-8")
+            except vbm_json.JSONSyntaxError: bad += 1
+    try: vbm_json.escape_string(b"\xff"); sys.exit("test_python: escape_string accepted 0xff")
+    except vbm_json.JSONSyntaxError: pass
     print("test_python: %d rows (%s): %d accepted and read back to the canonical form, %d errors with the reference's code" % (rows, ", ".join("%s %d" % kv for kv in sorted(sets.items())), ok, errs))
 
 main()

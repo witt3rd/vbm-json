@@ -51,8 +51,21 @@ pub struct vbm_json_tape {
     pub allocator_: vbm_json_allocator,
 }
 
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct vbm_json_bytes {
+    pub data: *const u8,
+    pub len: usize,
+    pub block_: *mut c_void,
+    pub block_size_: usize,
+    pub allocator_: vbm_json_allocator,
+}
+
 #[link(name = "vbm_json")]
 extern "C" {
     pub fn vbm_json_parse(buf: *const u8, len: usize, opts: *const vbm_json_opts, tape: *mut vbm_json_tape) -> c_int;
     pub fn vbm_json_free(tape: *mut vbm_json_tape);
+    pub fn vbm_json_print_tape(tape: *const vbm_json_tape, opts: *const vbm_json_opts, out: *mut vbm_json_bytes) -> c_int;
+    pub fn vbm_json_escape_string(buf: *const u8, len: usize, opts: *const vbm_json_opts, out: *mut vbm_json_bytes) -> c_int;
+    pub fn vbm_json_bytes_free(out: *mut vbm_json_bytes);
 }

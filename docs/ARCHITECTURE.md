@@ -29,7 +29,7 @@ vbm-json is one Lean program with one proof, projected onto several languages. N
 - **The fast parser is not trusted on its own.** It exists only with a refinement proof to the reference (`parseFast_eq_parse`). The test vectors are generated from the reference, never from the fast code, and checked against both.
 - **The boundary never decides.** The C shim copies bytes in, calls the Lean export, checks the result header and hands back a flat tape. A language binding reads the tape. Which documents are valid, and what a value is, is decided in Lean only.
 - **One runtime for every target.** `runtime/rt.c` replaces, for the objects the verified parser builds, the few Lean runtime functions the generated C calls, and the handful of libc functions it needs. It serves the native library and the WebAssembly module alike.
-- **The ABI is small and stable.** `vbm_json_parse` and `vbm_json_free`, caller-owned memory or your own allocator, a flat tape of little-endian 64-bit words (kind and length, then offset or subtree size). The description `abi/vbm_json.abi.json` is checked against the header by Tier 1, and the bindings are generated from it.
+- **The ABI is small and stable.** `vbm_json_parse` and `vbm_json_free`, `vbm_json_print_tape` (a tape back to compact JSON bytes), `vbm_json_escape_string` (a string literal from UTF-8) and `vbm_json_bytes_free`, caller-owned memory or your own allocator, a flat tape of little-endian 64-bit words (kind and length, then offset or subtree size). The description `abi/vbm_json.abi.json` is checked against the header by Tier 1, and the bindings are generated from it.
 
 ## The gates that keep the picture true
 

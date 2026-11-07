@@ -17,7 +17,7 @@ cf=(-ffreestanding -nostdlib -nostdlibinc -fno-stack-protector -fno-builtin -ffu
 arch=(); [ "$(uname -m)" != aarch64 ] || arch=(-mno-outline-atomics)
 cf+=("${arch[@]}")
 objs=()
-for f in Value Policy Grammar Reference Print Parse Struct Tape; do
+for f in Value Policy Grammar Reference Print Parse Struct Tape PrintBytes PrintTape; do
   [ -f ".lake/build/ir/LeanJson/$f.c" ] || { echo "build_native: .lake/build/ir/LeanJson/$f.c missing" >&2; exit 1; }
   cc "${cf[@]}" -c ".lake/build/ir/LeanJson/$f.c" -o "$tmp/$f.o"; objs+=("$tmp/$f.o")
 done
@@ -35,7 +35,7 @@ done
 cc "${arch[@]}" -ffreestanding -nostdlib -nostdinc -ffunction-sections -fdata-sections -O2 -fPIC -DNDEBUG -Wall -Wextra -Werror -I include -I "$tc/include" -c abi/vbm_json.c -o "$tmp/abi.o"; objs+=("$tmp/abi.o")
 cc "${cf[@]}" -Wall -Wextra -Werror -c "${VBM_RT_C:-runtime/rt.c}" -o "$tmp/rt.o"; objs+=("$tmp/rt.o")
 for x in ${VBM_EXTRA_C:-}; do cc "${cf[@]}" -c "$x" -o "$tmp/x$(basename "$x").o"; objs+=("$tmp/x$(basename "$x").o"); done
-keep=(vbm_json_parse vbm_json_free ${VBM_KEEP:-})
+keep=(vbm_json_parse vbm_json_free vbm_json_print_tape vbm_json_escape_string vbm_json_bytes_free ${VBM_KEEP:-})
 und_args=(); for k in "${keep[@]}"; do und_args+=(--undefined="$k"); done
 ld.lld -r --gc-sections "${und_args[@]}" -o "$tmp/all.o" "${objs[@]}"
 printf '%s\n' "${keep[@]}" > "$tmp/keep.txt"

@@ -3,6 +3,7 @@
 // The module imports nothing: instantiate with an empty imports object (an import would make instantiation fail, which is the gate).
 export const OK = 0, SYNTAX = 1, DEPTH = 2, NOMEM = 3, ARG = 4, INTERNAL = 5;
 export const MAX_INPUT = 1 << 30;   // the Lean runtime in the module has no bignums: Nats stay below 2^31 (runtime/rt.c)
+const BYTES_STRUCT = 28;            // sizeof(vbm_json_bytes) on wasm32: data, len, block_, block_size_, allocator{ctx,alloc,free}
 const TAPE_STRUCT = 36;             // sizeof(vbm_json_tape) on wasm32: words, nwords, text, ntext, block_, block_size_, allocator{ctx,alloc,free}
 
 export async function load(bytes) {
@@ -25,7 +26,34 @@ export async function load(bytes) {
     x.vbm_json_wasm_dealloc(inp); x.vbm_json_wasm_dealloc(t);
     return r;
   }
-  return { parse, live: () => x.vbm_json_wasm_live(), memoryBytes: () => mem().byteLength, exports: x };
+  /** The compact JSON that vbm_json_print_tape writes for the tape of `input` (parsed first, in the module): {code} (the parse code or the print code), or {code: OK, bytes} a COPY. */
+  function printed(input) {
+    if (input.length > MAX_INPUT) return { code: ARG };
+    const inp = x.vbm_json_wasm_alloc(Math.max(input.length, 1)), t = x.vbm_json_wasm_alloc(TAPE_STRUCT), o = x.vbm_json_wasm_alloc(BYTES_STRUCT);
+    if (!inp || !t || !o) { for (const p of [inp, t, o]) if (p) x.vbm_json_wasm_dealloc(p); return { code: NOMEM }; }
+    new Uint8Array(mem(), inp, input.length).set(input);
+    let code = x.vbm_json_parse(inp, input.length, 0, t), r = { code };
+    if (code === OK) {
+      code = x.vbm_json_print_tape(t, 0, o); r = { code };
+      if (code === OK) { const v = new DataView(mem()), d = v.getUint32(o, true), n = v.getUint32(o + 4, true); r = { code, bytes: new Uint8Array(mem().slice(d, d + n)) }; x.vbm_json_bytes_free(o); }
+      x.vbm_json_free(t);
+    }
+    for (const p of [inp, t, o]) x.vbm_json_wasm_dealloc(p);
+    return r;
+  }
+  /** The string literal that vbm_json_escape_string writes for the UTF-8 text `input`: {code} or {code: OK, bytes}. */
+  function escaped(input) {
+    if (input.length > MAX_INPUT) return { code: ARG };
+    const inp = x.vbm_json_wasm_alloc(Math.max(input.length, 1)), o = x.vbm_json_wasm_alloc(BYTES_STRUCT);
+    if (!inp || !o) { for (const p of [inp, o]) if (p) x.vbm_json_wasm_dealloc(p); return { code: NOMEM }; }
+    new Uint8Array(mem(), inp, input.length).set(input);
+    const code = x.vbm_json_escape_string(inp, input.length, 0, o);
+    let r = { code };
+    if (code === OK) { const v = new DataView(mem()), d = v.getUint32(o, true), n = v.getUint32(o + 4, true); r = { code, bytes: new Uint8Array(mem().slice(d, d + n)) }; x.vbm_json_bytes_free(o); }
+    for (const p of [inp, o]) x.vbm_json_wasm_dealloc(p);
+    return r;
+  }
+  return { parse, printed, escaped, live: () => x.vbm_json_wasm_live(), memoryBytes: () => mem().byteLength, exports: x };
 }
 
 /** Read a tape back to compact JSON bytes (strict: bounds, subtree sizes, text order); returns Uint8Array or throws. This is a second decoder, counted as boundary and tested. */

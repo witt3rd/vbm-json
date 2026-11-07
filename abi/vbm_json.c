@@ -23,6 +23,9 @@ _Static_assert(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__, "the tape is little-en
 
 lean_object *vbm_json_parse_tape(lean_object *input);     /* the Lean export (LeanJsonSimd/ParseSimd.lean: parseTapeSimd) */
 lean_object *initialize_vbm_x2djson_LeanJsonSimd_ParseSimd(uint8_t builtin);   /* Lean 4.35 names it package_Module; it also initialises the runtime and Init */
+lean_object *vbm_json_lean_print_tape(lean_object *words, lean_object *text);   /* the Lean exports of LeanJson/PrintTape.lean: the JSON bytes, or no bytes for a refused tape */
+lean_object *vbm_json_lean_escape_string(lean_object *text);                    /* the string literal, or no bytes for text that is not valid UTF-8 */
+lean_object *initialize_vbm_x2djson_LeanJson_PrintTape(uint8_t builtin);
 
 /* Once-only initialisation: 0 = not started, 1 = running, 2 = done. A concurrent first caller waits for the first to finish. */
 static int once_state_;
@@ -34,6 +37,7 @@ static void init_once_(void) {
     lean_object *r = initialize_vbm_x2djson_LeanJsonSimd_ParseSimd(1);
     init_ok_ = lean_io_result_is_ok(r);
     lean_dec_ref(r);
+    if (init_ok_) { r = initialize_vbm_x2djson_LeanJson_PrintTape(1); init_ok_ = lean_io_result_is_ok(r); lean_dec_ref(r); }
     lean_io_mark_end_initialization();
     __atomic_store_n(&once_state_, 2, __ATOMIC_RELEASE);
   } else {
@@ -116,4 +120,74 @@ void vbm_json_free(vbm_json_tape *tape) {
   if (!tape) return;
   if (tape->block_) tape->allocator_.free(tape->allocator_.ctx, tape->block_, tape->block_size_);
   vbm_zero_(tape, sizeof *tape);
+}
+
+/* PRINTING (the same rules as the parse: the allocator in opts, the default one handing the Lean result out in place). The Lean functions decide everything (what a tape prints to, what is valid UTF-8); this moves bytes. */
+static int pick_alloc_(const vbm_json_opts *opts, const vbm_json_allocator **al) {
+  *al = &dflt_;
+  if (opts) {
+    if (opts->size < sizeof(size_t) + sizeof(void *)) return VBM_JSON_ARG;
+    if (opts->allocator) *al = opts->allocator;
+  }
+  return (*al)->alloc && (*al)->free ? VBM_JSON_OK : VBM_JSON_ARG;
+}
+
+/* Hand out the Lean result `r` (consumed): no bytes = `refused`; with the default allocator and a result nobody else holds, the ByteArray itself; otherwise a copy in one block from the embedder's allocator. */
+static int deliver_(lean_object *r, const vbm_json_allocator *al, vbm_json_bytes *out, int refused) {
+  size_t n = lean_sarray_size(r);
+  int rc = refused;
+  if (n == 0) { }
+  else if (al == &dflt_ && lean_is_exclusive(r)) {
+    out->data = lean_sarray_cptr(r); out->len = n;
+    out->block_ = r; out->block_size_ = n; out->allocator_ = dflt_inplace_;
+    return VBM_JSON_OK;
+  } else {
+    void *blk = al->alloc(al->ctx, n);
+    if (!blk) rc = VBM_JSON_NOMEM;
+    else if ((uintptr_t)blk % 8) { al->free(al->ctx, blk, n); rc = VBM_JSON_ARG; }
+    else {
+      memcpy(blk, lean_sarray_cptr(r), n);
+      out->data = blk; out->len = n; out->block_ = blk; out->block_size_ = n; out->allocator_ = *al;
+      rc = VBM_JSON_OK;
+    }
+  }
+  lean_dec_ref(r);
+  return rc;
+}
+
+int vbm_json_print_tape(const vbm_json_tape *tape, const vbm_json_opts *opts, vbm_json_bytes *out) {
+  if (!out) return VBM_JSON_ARG;
+  vbm_zero_(out, sizeof *out);
+  if (!tape || (!tape->words && tape->nwords) || (!tape->text && tape->ntext)) return VBM_JSON_ARG;
+  if (tape->nwords > (size_t)LEAN_MAX_SMALL_NAT / 8 || tape->ntext > (size_t)LEAN_MAX_SMALL_NAT) return VBM_JSON_ARG;
+  const vbm_json_allocator *al;
+  int rc = pick_alloc_(opts, &al);
+  if (rc) return rc;
+  init_once_();
+  if (!init_ok_) return VBM_JSON_INTERNAL;
+  size_t wb = tape->nwords * 8;
+  lean_object *w = lean_alloc_sarray(1, wb, wb), *x = lean_alloc_sarray(1, tape->ntext, tape->ntext);
+  if (wb) memcpy(lean_sarray_cptr(w), tape->words, wb);
+  if (tape->ntext) memcpy(lean_sarray_cptr(x), tape->text, tape->ntext);
+  return deliver_(vbm_json_lean_print_tape(w, x), al, out, VBM_JSON_ARG);   /* consumes w and x */
+}
+
+int vbm_json_escape_string(const uint8_t *buf, size_t len, const vbm_json_opts *opts, vbm_json_bytes *out) {
+  if (!out) return VBM_JSON_ARG;
+  vbm_zero_(out, sizeof *out);
+  if ((!buf && len) || len > (size_t)LEAN_MAX_SMALL_NAT) return VBM_JSON_ARG;
+  const vbm_json_allocator *al;
+  int rc = pick_alloc_(opts, &al);
+  if (rc) return rc;
+  init_once_();
+  if (!init_ok_) return VBM_JSON_INTERNAL;
+  lean_object *in = lean_alloc_sarray(1, len, len);
+  if (len) memcpy(lean_sarray_cptr(in), buf, len);
+  return deliver_(vbm_json_lean_escape_string(in), al, out, VBM_JSON_SYNTAX);   /* consumes in */
+}
+
+void vbm_json_bytes_free(vbm_json_bytes *out) {
+  if (!out) return;
+  if (out->block_) out->allocator_.free(out->allocator_.ctx, out->block_, out->block_size_);
+  vbm_zero_(out, sizeof *out);
 }

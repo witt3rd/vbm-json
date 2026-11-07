@@ -56,6 +56,23 @@ int vbm_json_parse(const uint8_t *buf, size_t len, const vbm_json_opts *opts, vb
 /* Release a tape (with the allocator it came from). Safe on a zeroed tape and called twice. */
 void vbm_json_free(vbm_json_tape *tape);
 
+/* PRINTING. Bytes the library wrote: `data[0..len)`, from the same allocator rules as the tape (default: the library's own heap, handed out in place; opts->allocator: one block of exactly `len` bytes from yours). Release with vbm_json_bytes_free. */
+typedef struct vbm_json_bytes {
+  const uint8_t *data; size_t len;
+  void *block_; size_t block_size_; vbm_json_allocator allocator_;   /* private: for vbm_json_bytes_free */
+} vbm_json_bytes;
+
+/* The compact JSON of a tape (no whitespace; numbers as the tape's lexeme; strings escaped minimally: `"` `\` and the controls below 0x20, everything else as UTF-8). The tape is read, not changed: pass the tape vbm_json_parse gave you (or one
+ * with that layout). VBM_JSON_OK: *out is filled (never empty) and must be released with vbm_json_bytes_free; parsing the bytes again gives the same tape. VBM_JSON_ARG: the tape is refused (bad pointers, or its structure, a string's UTF-8 or a number's
+ * characters, its nesting past 512, or its sizes do not hold together); a tape from vbm_json_parse is never refused. Any other code: *out is zeroed and there is nothing to free. */
+int vbm_json_print_tape(const vbm_json_tape *tape, const vbm_json_opts *opts, vbm_json_bytes *out);
+
+/* The JSON string literal of the UTF-8 text buf[0..len): a quote, the text escaped as above, a quote (never empty). An encoder that holds a string builds objects around this. VBM_JSON_SYNTAX: the text is not valid UTF-8 (strict, as for parsing). */
+int vbm_json_escape_string(const uint8_t *buf, size_t len, const vbm_json_opts *opts, vbm_json_bytes *out);
+
+/* Release bytes (with the allocator they came from). Safe on a zeroed value and called twice. */
+void vbm_json_bytes_free(vbm_json_bytes *out);
+
 #ifdef __cplusplus
 }
 #endif

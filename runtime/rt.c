@@ -162,6 +162,7 @@ void lean_mark_persistent(lean_object *o) {
 lean_object *lean_nat_big_add(lean_object *a, lean_object *b) { (void)a; (void)b; TRAP(); }
 bool lean_nat_big_lt(lean_object *a, lean_object *b) { (void)a; (void)b; TRAP(); }
 lean_object *lean_big_usize_to_nat(size_t n) { (void)n; TRAP(); }
+lean_object *lean_big_uint64_to_nat(uint64_t n) { (void)n; TRAP(); }   /* the printer's tape words: every word read as a Nat is first bounded (a length is below 2^56, an offset below 2^62: LeanJson/PrintTape.lean) */
 lean_object *lean_nat_big_sub(lean_object *a, lean_object *b) { (void)a; (void)b; TRAP(); }
 lean_object *lean_nat_big_mul(lean_object *a, lean_object *b) { (void)a; (void)b; TRAP(); }
 lean_object *lean_nat_overflow_mul(size_t a, size_t b) { (void)a; (void)b; TRAP(); }

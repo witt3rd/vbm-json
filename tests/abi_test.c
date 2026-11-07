@@ -4,7 +4,10 @@
  * results of the fault injection are ENUMERATED over the boundary values of the result layout and judged by a model of the layout contract (include/vbm_json.h), not listed by hand.
  * It checks (1) every row's verdict and error code through vbm_json_parse, and for an accepted row reads the TAPE back with an independent reader (strict: bounds, subtree sizes,
  * text order) and compares the compact form with the reference's canonical bytes; (2) a failing allocator is VBM_JSON_NOMEM and every allocation is released, on a row's input;
- * (3) no growth of resident memory over many parses of rows, ok and failing (VBM_JSON_TEST_LEAK=1 leaks on purpose: this check must then FAIL). Exit 0 = all pass. */
+ * (3) no growth of resident memory over many parses of rows, ok and failing (VBM_JSON_TEST_LEAK=1 leaks on purpose: this check must then FAIL).
+ * PRINTING: for an accepted row vbm_json_print_tape of the parsed tape is the reference's canonical bytes and parses back to the SAME tape (words and text); a tape with a word or text byte changed (forged: enumerated by a fixed generator
+ * over the row) is either refused (VBM_JSON_ARG) or prints a document that parses, and that tape prints and parses again to itself; vbm_json_escape_string of every row's input (valid UTF-8 or not, judged by an independent strict decoder here)
+ * is the string literal the escape table here gives, or VBM_JSON_SYNTAX; the allocator rules hold for the printed bytes too. Exit 0 = all pass. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -20,6 +23,39 @@ static void put(buf *b, const void *s, size_t n) {
 }
 static void putc_(buf *b, char c) { put(b, &c, 1); }
 
+/* the string literal of the UTF-8 text s[0..len): the escape table of the printer's policy (include/vbm_json.h), written independently of the Lean code */
+static void put_literal(buf *o, const uint8_t *s, size_t len) {
+  putc_(o, '"');
+  for (size_t k = 0; k < len; k++) {
+    uint8_t c = s[k];
+    if (c == '"') put(o, "\\\"", 2); else if (c == '\\') put(o, "\\\\", 2);
+    else if (c == 8) put(o, "\\b", 2); else if (c == 12) put(o, "\\f", 2); else if (c == 10) put(o, "\\n", 2);
+    else if (c == 13) put(o, "\\r", 2); else if (c == 9) put(o, "\\t", 2);
+    else if (c < 0x20) { char e[8]; snprintf(e, sizeof e, "\\u00%02x", c); put(o, e, 6); }
+    else putc_(o, (char)c);
+  }
+  putc_(o, '"');
+}
+
+/* strict UTF-8 (RFC 3629: no overlongs, no surrogates, nothing above U+10FFFF), the textbook automaton: an independent decider for the escape check */
+static int utf8_valid(const uint8_t *s, size_t n) {
+  size_t i = 0;
+  while (i < n) {
+    uint8_t c = s[i];
+    if (c < 0x80) { i++; continue; }
+    size_t k; uint8_t lo = 0x80, hi = 0xBF;
+    if (c >= 0xC2 && c <= 0xDF) k = 1;
+    else if (c >= 0xE0 && c <= 0xEF) { k = 2; if (c == 0xE0) lo = 0xA0; if (c == 0xED) hi = 0x9F; }
+    else if (c >= 0xF0 && c <= 0xF4) { k = 3; if (c == 0xF0) lo = 0x90; if (c == 0xF4) hi = 0x8F; }
+    else return 0;
+    if (i + k >= n) return 0;
+    if (s[i + 1] < lo || s[i + 1] > hi) return 0;
+    for (size_t j = 2; j <= k; j++) if (s[i + j] < 0x80 || s[i + j] > 0xBF) return 0;
+    i += k + 1;
+  }
+  return 1;
+}
+
 /* the tape reader: prints the compact JSON of the node at *i, advancing *i; *cur is the text cursor (texts are in document order). Returns 0, or -1 on a malformed tape. */
 static int node(const vbm_json_tape *t, size_t *i, size_t *cur, buf *o, int depth) {
   if (depth > 600 || *i + 2 > t->nwords) return -1;
@@ -33,16 +69,7 @@ static int node(const vbm_json_tape *t, size_t *i, size_t *cur, buf *o, int dept
     if (aux != *cur || len > t->ntext || aux > t->ntext - len) return -1;
     const uint8_t *s = t->text + aux; *cur += len;
     if (kind == VBM_JSON_NUMBER) { put(o, s, len); return 0; }
-    putc_(o, '"');
-    for (uint64_t k = 0; k < len; k++) {
-      uint8_t c = s[k];
-      if (c == '"') put(o, "\\\"", 2); else if (c == '\\') put(o, "\\\\", 2);
-      else if (c == 8) put(o, "\\b", 2); else if (c == 12) put(o, "\\f", 2); else if (c == 10) put(o, "\\n", 2);
-      else if (c == 13) put(o, "\\r", 2); else if (c == 9) put(o, "\\t", 2);
-      else if (c < 0x20) { char e[8]; snprintf(e, sizeof e, "\\u00%02x", c); put(o, e, 6); }
-      else putc_(o, (char)c);
-    }
-    putc_(o, '"'); return 0; }
+    put_literal(o, s, len); return 0; }
   case VBM_JSON_ARRAY: case VBM_JSON_OBJECT: {
     if (aux < 2 || aux > t->nwords - at) return -1;
     putc_(o, kind == VBM_JSON_ARRAY ? '[' : '{');
@@ -87,6 +114,81 @@ static int failures;
 static uint8_t *samp; static size_t samp_n; static uint8_t *esamp; static size_t esamp_n;
 static void fail(const char *fmt, const char *what, size_t id) { fprintf(stderr, "FAIL row %zu (%s): ", id, what); fprintf(stderr, "%s\n", fmt); failures++; }
 
+static size_t printed, forged_ok, forged_refused, esc_ok, esc_refused;
+static uint64_t rng = 0x9E3779B97F4A7C15ull;
+static uint64_t next_rand(void) { rng ^= rng << 13; rng ^= rng >> 7; rng ^= rng << 17; return rng; }
+
+/* a tape with some words or text bytes changed (and sometimes shortened): refused, or it prints a document that parses and prints again to the same bytes */
+static void check_forged(const vbm_json_tape *t, size_t id) {
+  if (t->nwords > 3000) return;
+  rng = 0x9E3779B97F4A7C15ull ^ (id * 0xD1B54A32D192ED03ull);
+  for (int round = 0; round < 6; round++) {
+    size_t wb = t->nwords * 8, tn = t->ntext;
+    uint8_t *w = malloc(wb + 1), *x = malloc(tn + 1); memcpy(w, t->words, wb); if (tn) memcpy(x, t->text, tn);
+    size_t nw = t->nwords, nt = tn; int muts = 1 + (int)(next_rand() % 3);
+    for (int m = 0; m < muts; m++) {
+      uint64_t r = next_rand();
+      switch (r % 6) {
+      case 0: if (wb) w[(r >> 8) % wb] ^= (uint8_t)(1u << ((r >> 40) % 8)); break;
+      case 1: if (nt) x[(r >> 8) % nt] ^= (uint8_t)(1u << ((r >> 40) % 8)); break;
+      case 2: if (nt) x[(r >> 8) % nt] = (uint8_t)(r >> 40); break;
+      case 3: if (nw > 1) nw--; break;
+      case 4: if (nt) nt--; break;
+      default: if (wb) { static const uint64_t sp[] = { 0, 1, 2, 3, 4, 5, 6, 7, 0x4000000000000000ull, ~0ull, 0x100, 0x200 }; uint64_t v = sp[(r >> 8) % 12]; memcpy(w + 8 * ((r >> 20) % (wb / 8)), &v, 8); } break;
+      }
+    }
+    vbm_json_tape f = { (const uint64_t *)w, nw, x, nt, 0, 0, {0, 0, 0} };
+    {
+      vbm_json_bytes b; int rc = vbm_json_print_tape(&f, NULL, &b);
+      if (rc == VBM_JSON_OK) {
+        vbm_json_tape p; int pr = vbm_json_parse(b.data, b.len, NULL, &p);
+        if (pr != VBM_JSON_OK) fail("a forged tape printed a document that does not parse", "forged", id);
+        else {
+          vbm_json_bytes b2; vbm_json_tape p2;   /* print, parse, print, parse: the same tape (a forged number may be written with E or +, which the second print normalises) */
+          if (vbm_json_print_tape(&p, NULL, &b2) != VBM_JSON_OK) fail("a tape the parser wrote is refused (after a forged one printed)", "forged", id);
+          else {
+            if (vbm_json_parse(b2.data, b2.len, NULL, &p2) != VBM_JSON_OK) fail("the second printed document does not parse", "forged", id);
+            else { if (p2.nwords != p.nwords || p2.ntext != p.ntext || memcmp(p2.words, p.words, 8 * p.nwords) || (p.ntext && memcmp(p2.text, p.text, p.ntext))) fail("print then parse is not stable on a forged tape", "forged", id); vbm_json_free(&p2); }
+            vbm_json_bytes_free(&b2);
+          }
+          vbm_json_free(&p);
+        }
+        vbm_json_bytes_free(&b); forged_ok++;
+      } else if (rc == VBM_JSON_ARG) { if (b.data || b.len) fail("a refused tape left bytes", "forged", id); forged_refused++; }
+      else fail("a forged tape gave a code other than OK or ARG", "forged", id);
+    }
+    free(w); free(x);
+  }
+}
+
+static void check_print(const vbm_json_tape *t, const uint8_t *canon, size_t clen, size_t id) {
+  vbm_json_bytes b;
+  if (vbm_json_print_tape(t, NULL, &b) != VBM_JSON_OK) { fail("print_tape refuses a tape the parser wrote", "print", id); return; }
+  if (b.len != clen || memcmp(b.data, canon, clen)) fail("the printed document is not the reference's canonical form", "print", id);
+  vbm_json_tape t2; int rc = vbm_json_parse(b.data, b.len, NULL, &t2);
+  if (rc != VBM_JSON_OK) fail("a printed document does not parse", "print", id);
+  else {
+    if (t2.nwords != t->nwords || t2.ntext != t->ntext || memcmp(t2.words, t->words, 8 * t->nwords) || (t->ntext && memcmp(t2.text, t->text, t->ntext))) fail("a printed document does not parse back to the same tape", "print", id);
+    vbm_json_free(&t2);
+  }
+  vbm_json_bytes_free(&b); printed++;
+  check_forged(t, id);
+}
+
+/* escape_string on a row's input, valid UTF-8 or not */
+static void check_escape(const uint8_t *in, size_t n, size_t id) {
+  vbm_json_bytes b; int rc = vbm_json_escape_string(in, n, NULL, &b);
+  if (utf8_valid(in, n)) {
+    buf e = {0}; put_literal(&e, in, n);
+    if (rc != VBM_JSON_OK) fail("escape_string refuses valid UTF-8", "escape", id);
+    else if (b.len != e.n || memcmp(b.data, e.p, e.n)) fail("escape_string differs from the escape table", "escape", id);
+    else esc_ok++;
+    free(e.p);
+  } else if (rc != VBM_JSON_SYNTAX || b.data || b.len) fail("escape_string accepts text that is not UTF-8 (or gives the wrong code)", "escape", id);
+  else esc_refused++;
+  if (rc == VBM_JSON_OK) vbm_json_bytes_free(&b);
+}
+
 static int run_rows(const char *path) {
   FILE *f = fopen(path, "r"); if (!f) { perror(path); return 1; }
   char *line = NULL; size_t cap = 0; ssize_t got; size_t rows = 0, ok = 0, err_syntax = 0, err_depth = 0;
@@ -105,7 +207,7 @@ static int run_rows(const char *path) {
         buf o = {0};
         if (read_tape(&t, &o)) fail("the tape is malformed", "ok", id);
         else if (o.n != clen || memcmp(o.p, canon, clen)) fail("the tape does not read back to the canonical form", "ok", id);
-        else { ok++; if (!samp && ilen >= 24 && ilen <= 300 && t.ntext >= 4 && memchr(in, '{', ilen)) { samp = malloc(ilen); memcpy(samp, in, ilen); samp_n = ilen; } }
+        else { ok++; check_print(&t, canon, clen, id); if (!samp && ilen >= 24 && ilen <= 300 && t.ntext >= 4 && memchr(in, '{', ilen)) { samp = malloc(ilen); memcpy(samp, in, ilen); samp_n = ilen; } }
         free(o.p);
       }
       free(canon);
@@ -116,10 +218,14 @@ static int run_rows(const char *path) {
       else if (rc == VBM_JSON_SYNTAX) { err_syntax++; if (!esamp && ilen >= 3 && ilen <= 300) { esamp = malloc(ilen); memcpy(esamp, in, ilen); esamp_n = ilen; } } else err_depth++;
       if (rc != VBM_JSON_OK && (t.words || t.text)) fail("a rejected parse left a tape", "err", id);
     }
-    vbm_json_free(&t); free(in);
+    vbm_json_free(&t);
+    check_escape(in, ilen, id);
+    free(in);
   }
   free(line); fclose(f);
   printf("abi_test: %zu rows (%zu accepted and read back to the canonical form, %zu syntax errors, %zu depth errors)\n", rows, ok, err_syntax, err_depth);
+  printf("abi_test: printing: %zu tapes print to the canonical bytes and parse back to the same tape; %zu forged tapes printed documents that parse and are stable, %zu were refused; escape_string: %zu texts to the literal, %zu non-UTF-8 texts refused\n", printed, forged_ok, forged_refused, esc_ok, esc_refused);
+  if (printed < 1000 || forged_refused < 100 || forged_ok < 100 || esc_refused < 100 || esc_ok < 1000) { fprintf(stderr, "FAIL: the printing checks ran too few cases\n"); failures++; }
   if (rows < 1000) { fprintf(stderr, "FAIL: only %zu rows\n", rows); failures++; }
   if (!samp || !esamp) { fprintf(stderr, "FAIL: the rows have no small accepted object and no small syntax error to build the allocator and leak checks on\n"); failures++; }
   return 0;
@@ -170,6 +276,33 @@ static void allocator(void) {
   for (int k = 0; k < 2; k++) { vbm_json_opts ho = { sizeof o, &half[k] }; if (vbm_json_parse(samp, samp_n, &ho, &t) != VBM_JSON_ARG) fail("an allocator missing one function is not VBM_JSON_ARG", "alloc", (size_t)k); }
   if (vbm_json_parse(NULL, 5, NULL, &t) != VBM_JSON_ARG || vbm_json_parse(samp, 3, NULL, NULL) != VBM_JSON_ARG) fail("bad arguments are not VBM_JSON_ARG", "alloc", 0);
   if (vbm_json_parse(NULL, 0, NULL, &t) != VBM_JSON_SYNTAX) fail("the empty input is not VBM_JSON_SYNTAX", "alloc", 0);
+  /* the printed bytes follow the same rules: the default allocator hands out the result's own ByteArray; an embedder's allocator is asked once for exactly the bytes, a failing one is NOMEM, bad arguments are ARG */
+  {
+    vbm_json_tape pt; vbm_json_bytes b, b0;
+    if (vbm_json_parse(samp, samp_n, NULL, &pt) != VBM_JSON_OK || vbm_json_print_tape(&pt, NULL, &b0) != VBM_JSON_OK) { fail("the sample does not print", "alloc", 0); return; }
+    lean_object *ob = b0.block_;
+    if (!ob || ob->m_tag != LeanScalarArray || lean_sarray_cptr(ob) != b0.data || lean_sarray_size(ob) != b0.len) { fail("the default printed bytes are not the result ByteArray in place", "alloc", 0); vbm_json_bytes_free(&b0); }
+    else { vbm_json_bytes b1 = b0; lean_inc_ref(ob); vbm_json_bytes_free(&b0); if (!lean_is_exclusive(ob)) fail("vbm_json_bytes_free did not release the block's ByteArray", "alloc", 0); vbm_json_bytes_free(&b1); }   /* the second reference is released by the library itself (its runtime may not be the one this test links) */
+    counting pc = {0}; vbm_json_allocator pal = { &pc, c_alloc, c_free }; vbm_json_opts po = { sizeof po, &pal };
+    int rc = vbm_json_print_tape(&pt, &po, &b);
+    if (rc != VBM_JSON_OK || pc.live != 1 || pc.calls != 1 || pc.last != b.len || (uintptr_t)b.data % 8) fail("the embedder's allocator is not used exactly once, for exactly the printed bytes", "alloc", 0);
+    vbm_json_bytes_free(&b); vbm_json_bytes_free(&b);
+    if (pc.live != 0) fail("the printed bytes are not released with the same size", "alloc", 0);
+    pc.fail_at = 1; pc.calls = 0;
+    if (vbm_json_print_tape(&pt, &po, &b) != VBM_JSON_NOMEM || b.data || pc.live != 0) fail("a failing allocator is not NOMEM for printing", "alloc", 0);
+    pc.fail_at = 1; pc.calls = 0;
+    if (vbm_json_escape_string(samp, samp_n, &po, &b) == VBM_JSON_OK) { fail("escape_string with a failing allocator succeeded", "alloc", 0); vbm_json_bytes_free(&b); }
+    else if (pc.live != 0) fail("escape_string with a failing allocator left memory", "alloc", 0);
+    pc.fail_at = 0;
+    vbm_json_opts pbad = { sizeof po, &(vbm_json_allocator){ 0, 0, 0 } };
+    if (vbm_json_print_tape(&pt, &pbad, &b) != VBM_JSON_ARG || vbm_json_escape_string(samp, samp_n, &pbad, &b) != VBM_JSON_ARG) fail("an allocator with no functions is not ARG for printing", "alloc", 0);
+    if (vbm_json_print_tape(NULL, NULL, &b) != VBM_JSON_ARG || vbm_json_print_tape(&pt, NULL, NULL) != VBM_JSON_ARG || vbm_json_escape_string(NULL, 3, NULL, &b) != VBM_JSON_ARG || vbm_json_escape_string(samp, 3, NULL, NULL) != VBM_JSON_ARG) fail("bad arguments are not ARG for printing", "alloc", 0);
+    vbm_json_tape et = { 0, 0, 0, 0, 0, 0, {0, 0, 0} };
+    if (vbm_json_print_tape(&et, NULL, &b) != VBM_JSON_ARG) fail("the empty tape is not refused", "alloc", 0);
+    if (vbm_json_escape_string(NULL, 0, NULL, &b) != VBM_JSON_OK || b.len != 2 || b.data[0] != '"' || b.data[1] != '"') fail("the empty text is not the literal \"\"", "alloc", 0);
+    vbm_json_bytes_free(&b);
+    vbm_json_free(&pt);
+  }
   printf("abi_test: the allocator hook is used once, released with its size; a failing one is VBM_JSON_NOMEM; bad arguments are VBM_JSON_ARG\n");
 }
 
@@ -178,6 +311,9 @@ static void allocator(void) {
  * an input of LEAN_MAX_SMALL_NAT bytes are stubbed (the real runtime would abort on out-of-memory, T09), so the bound of the length check is tested at its edge. */
 static const uint8_t *fx_bytes; static size_t fx_n;
 lean_object *fx_export(lean_object *in) { lean_dec_ref(in); lean_object *o = lean_alloc_sarray(1, fx_n, fx_n); if (fx_n) memcpy(lean_sarray_cptr(o), fx_bytes, fx_n); return o; }
+static const uint8_t *fx_pbytes; static size_t fx_pn;   /* what the fake print and escape exports hand back */
+lean_object *fx_print(lean_object *w, lean_object *x) { lean_dec_ref(w); lean_dec_ref(x); lean_object *o = lean_alloc_sarray(1, fx_pn, fx_pn); if (fx_pn) memcpy(lean_sarray_cptr(o), fx_pbytes, fx_pn); return o; }
+lean_object *fx_escape(lean_object *in) { lean_dec_ref(in); lean_object *o = lean_alloc_sarray(1, fx_pn, fx_pn); if (fx_pn) memcpy(lean_sarray_cptr(o), fx_pbytes, fx_pn); return o; }
 lean_object *fx_init(uint8_t builtin) { (void)builtin; return lean_io_result_mk_ok(lean_box(0)); }
 static lean_object *fx_alloc_sarray(unsigned elem, size_t size, size_t cap) { return lean_alloc_sarray(elem, size > 4096 ? 0 : size, size > 4096 ? 0 : cap); }
 static void *fx_memcpy(void *d, const void *s, size_t n) { return n > 4096 ? d : memcpy(d, s, n); }
@@ -185,6 +321,12 @@ static int fx_copy;   /* 1: the copy of the shim sees every result as shared, so
 #define lean_is_exclusive(o) (!fx_copy && lean_is_exclusive(o))
 #define vbm_json_parse fx_parse
 #define vbm_json_free fx_free
+#define vbm_json_print_tape fx_print_tape
+#define vbm_json_escape_string fx_escape_string
+#define vbm_json_bytes_free fx_bytes_free
+#define vbm_json_lean_print_tape fx_print
+#define vbm_json_lean_escape_string fx_escape
+#define initialize_vbm_x2djson_LeanJson_PrintTape fx_init
 #define vbm_json_parse_tape fx_export
 #define initialize_vbm_x2djson_LeanJsonSimd_ParseSimd fx_init
 #define lean_alloc_sarray fx_alloc_sarray
@@ -193,6 +335,12 @@ static int fx_copy;   /* 1: the copy of the shim sees every result as shared, so
 #undef memcpy
 #undef lean_alloc_sarray
 #undef initialize_vbm_x2djson_LeanJsonSimd_ParseSimd
+#undef initialize_vbm_x2djson_LeanJson_PrintTape
+#undef vbm_json_lean_escape_string
+#undef vbm_json_lean_print_tape
+#undef vbm_json_bytes_free
+#undef vbm_json_escape_string
+#undef vbm_json_print_tape
 #undef vbm_json_parse_tape
 #undef vbm_json_free
 #undef vbm_json_parse
@@ -264,6 +412,26 @@ static void fault(void) {
   printf("abi_test: the shim agrees with the layout contract on %zu enumerated export results (%zu accepted), asks for exactly words + text, and its length check is exact at its edge\n", cases, ok);
 }
 
+/* what the shim does with a crafted result of the print and escape exports: no bytes is the refusal (ARG for printing, SYNTAX for escaping), any bytes are handed out exactly (in place or copied, with the default or an embedder's allocator) */
+static void fault_print(void) {
+  uint8_t r[64]; for (size_t k = 0; k < sizeof r; k++) r[k] = (uint8_t)(k * 11 + 3);
+  uint8_t in = 0; vbm_json_tape t = { (const uint64_t *)r, 1, r, 8, 0, 0, {0, 0, 0} }; size_t cases = 0;
+  for (fx_copy = 0; fx_copy < 2; fx_copy++) for (size_t n = 0; n <= 64; n++) for (int al = 0; al < 2; al++) {
+    counting c = {0}; vbm_json_allocator a = { &c, c_alloc, c_free }; vbm_json_opts o = { sizeof o, &a }; vbm_json_bytes b;
+    fx_pbytes = r; fx_pn = n;
+    for (int which = 0; which < 2; which++) {
+      int rc = which ? fx_escape_string(&in, 1, al ? &o : NULL, &b) : fx_print_tape(&t, al ? &o : NULL, &b); cases++;
+      if (n == 0) { if (rc != (which ? VBM_JSON_SYNTAX : VBM_JSON_ARG) || b.data || b.len) fail("an export result of no bytes is not the refusal", "fault", n); continue; }
+      if (rc != VBM_JSON_OK || b.len != n || memcmp(b.data, r, n)) { fail("an export result is not handed out exactly", "fault", n); continue; }
+      if (al && (c.live != 1 || c.last != n)) fail("the embedder's block is not exactly the result", "fault", n);
+      fx_bytes_free(&b); fx_bytes_free(&b);
+      if (c.live != 0 || b.data || b.len) fail("the result bytes are not released and zeroed", "fault", n);
+    }
+  }
+  fx_copy = 0;
+  printf("abi_test: the shim hands out %zu crafted print and escape results exactly, no bytes being the refusal\n", cases);
+}
+
 static long rss_pages(void) { long a = 0, r = 0; FILE *f = fopen("/proc/self/statm", "r"); if (!f) return -1; if (fscanf(f, "%ld %ld", &a, &r) != 2) r = -1; fclose(f); return r; }
 
 static void leak(void) {
@@ -274,6 +442,12 @@ static void leak(void) {
     vbm_json_tape t; c.fail_at = (i % 2) ? 1 : 0; c.calls = 0;
     int rc = vbm_json_parse(samp, samp_n, &o, &t);
     if (rc == VBM_JSON_OK) vbm_json_free(&t);
+    { vbm_json_tape pt; vbm_json_bytes b;   /* printing and escaping through the counting (and sometimes failing) allocator */
+      if (vbm_json_parse(samp, samp_n, NULL, &pt) == VBM_JSON_OK) {
+        c.calls = 0; if (vbm_json_print_tape(&pt, &o, &b) == VBM_JSON_OK) vbm_json_bytes_free(&b);
+        c.calls = 0; if (vbm_json_escape_string(samp, samp_n, &o, &b) == VBM_JSON_OK) vbm_json_bytes_free(&b);
+        vbm_json_free(&pt);
+      } }
     if (i % 7 == 0) { vbm_json_tape e; if (vbm_json_parse(esamp, esamp_n, &o, &e) == VBM_JSON_OK) vbm_json_free(&e); }
     if (deliberate) memset(malloc(1024), 1, 1024);
   }
@@ -289,7 +463,7 @@ int main(int argc, char **argv) {
   signal(SIGSEGV, on_crash); signal(SIGBUS, on_crash); signal(SIGABRT, on_crash);
   if (argc != 2) { fprintf(stderr, "usage: abi_test VECTORS.jsonl\n"); return 2; }
   if (run_rows(argv[1])) return 1;
-  allocator(); fault(); leak();
+  allocator(); fault(); fault_print(); leak();
   if (failures) { fprintf(stderr, "abi_test: %d failure(s)\n", failures); return 1; }
   printf("abi_test: ok\n"); return 0;
 }

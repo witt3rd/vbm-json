@@ -22,6 +22,10 @@ const fnv = (words, text) => {
 };
 
 const lines = readFileSync(vecPath, "utf8").split("\n").filter(Boolean);
+const strict = new TextDecoder("utf-8", { fatal: true });   // the WHATWG decoder: strict UTF-8, the independent decider for the escape check
+const literal = (b) => { const o = [0x22]; for (const c of b) { if (c === 0x22) o.push(0x5c, 0x22); else if (c === 0x5c) o.push(0x5c, 0x5c); else if (c === 8) o.push(0x5c, 0x62); else if (c === 12) o.push(0x5c, 0x66);
+  else if (c === 10) o.push(0x5c, 0x6e); else if (c === 13) o.push(0x5c, 0x72); else if (c === 9) o.push(0x5c, 0x74); else if (c < 0x20) o.push(...Buffer.from("\\u00" + c.toString(16).padStart(2, "0"))); else o.push(c); } o.push(0x22); return Buffer.from(o); };
+let nprint = 0, nesc = 0, nescbad = 0;
 const dump = []; let ok = 0, syn = 0, dep = 0; let okIn = null, errIn = null;
 for (let id = 0; id < lines.length; id++) {
   const row = JSON.parse(lines[id]);
@@ -33,15 +37,25 @@ for (let id = 0; id < lines.length; id++) {
     if (r.code !== OK) { fail(`row ${id}: the reference accepts, the module answers ${r.code}`); continue; }
     let got; try { got = tapeToCompact(r); } catch (e) { fail(`row ${id}: ${e.message}`); continue; }
     if (Buffer.compare(Buffer.from(got), Buffer.from(hex(row.canonical))) !== 0) fail(`row ${id}: the tape does not read back to the canonical form`); else ok++;
+    const p = lib.printed(hex(row.input));   // vbm_json_print_tape in the module: the reference's canonical bytes
+    if (p.code !== OK || Buffer.compare(Buffer.from(p.bytes), Buffer.from(hex(row.canonical))) !== 0) fail(`row ${id}: print_tape in the module is not the canonical form (code ${p.code})`); else nprint++;
   } else {
     const want = row.code === "syntax" ? SYNTAX : row.code === "depth" ? DEPTH : -1;
     if (r.code !== want) fail(`row ${id}: the verdict or error code differs from the reference (want ${row.code}, got ${r.code})`);
     else if (r.code === SYNTAX) syn++; else dep++;
   }
 }
+// escape_string in the module on the input of every row (valid UTF-8 or not: the WHATWG strict decoder decides)
+for (let id = 0; id < lines.length; id++) {
+  const input = hex(JSON.parse(lines[id]).input); let valid = true; try { strict.decode(input); } catch { valid = false; }
+  if (input.length > 20000) continue;
+  const e = lib.escaped(input);
+  if (valid) { if (e.code !== OK || Buffer.compare(Buffer.from(e.bytes), literal(input)) !== 0) fail(`row ${id}: escape_string in the module differs from the escape table (code ${e.code})`); else nesc++; }
+  else if (e.code !== SYNTAX) fail(`row ${id}: escape_string accepts text that is not UTF-8 (code ${e.code})`); else nescbad++;
+}
 if (lines.length < Number(process.env.VBM_MIN_ROWS || 1000)) fail(`only ${lines.length} rows`);
 writeFileSync(dumpPath, dump.join("\n") + "\n");
-console.log(`wasm_test: ${lines.length} rows (${ok} accepted and read back to the canonical form, ${syn} syntax errors, ${dep} depth errors)`);
+console.log(`wasm_test: ${lines.length} rows (${ok} accepted and read back to the canonical form, ${syn} syntax errors, ${dep} depth errors); print_tape gives the canonical bytes on ${nprint}; escape_string: ${nesc} texts to the literal, ${nescbad} non-UTF-8 texts refused`);
 
 // the module is still usable after every row (the deep ones included: the generated set has 100000-deep arrays and objects, DEPTH and no trap): the first row again answers as before
 { const again = lib.parse(hex(JSON.parse(lines[0]).input)); if (`0 ${again.code} ${again.code === OK ? fnv(again.words, again.text) : "0000000000000000"}` !== dump[0]) fail("the module answers differently on the first row after all the rows"); }

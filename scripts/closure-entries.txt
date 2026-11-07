@@ -3,3 +3,5 @@
 # of its own (the proved claims are about it). The other exports are added with the ABI.
 LeanJson.parseFast
 LeanJson.parseTapeSimd
+LeanJson.printTapeExport
+LeanJson.escapeStringExport

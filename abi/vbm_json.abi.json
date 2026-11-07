@@ -48,6 +48,12 @@
       {"name": "ntext", "type": "size", "c": "size_t ntext"},
       {"name": "block_", "type": "ptr", "c": "void *block_"},
       {"name": "block_size_", "type": "size", "c": "size_t block_size_"},
+      {"name": "allocator_", "type": "struct:vbm_json_allocator", "c": "vbm_json_allocator allocator_"}]},
+    {"name": "vbm_json_bytes", "fields": [
+      {"name": "data", "type": "ptr:u8", "c": "const uint8_t *data"},
+      {"name": "len", "type": "size", "c": "size_t len"},
+      {"name": "block_", "type": "ptr", "c": "void *block_"},
+      {"name": "block_size_", "type": "size", "c": "size_t block_size_"},
       {"name": "allocator_", "type": "struct:vbm_json_allocator", "c": "vbm_json_allocator allocator_"}]}
   ],
   "functions": [
@@ -56,6 +62,15 @@
      "params": [{"name": "buf", "type": "ptr:u8"}, {"name": "len", "type": "size"}, {"name": "opts", "type": "ptr:vbm_json_opts"}, {"name": "tape", "type": "ptr:vbm_json_tape"}]},
     {"name": "vbm_json_free", "c": "void vbm_json_free(vbm_json_tape *tape)",
      "ret": "void",
-     "params": [{"name": "tape", "type": "ptr:vbm_json_tape"}]}
+     "params": [{"name": "tape", "type": "ptr:vbm_json_tape"}]},
+    {"name": "vbm_json_print_tape", "c": "int vbm_json_print_tape(const vbm_json_tape *tape, const vbm_json_opts *opts, vbm_json_bytes *out)",
+     "ret": "int",
+     "params": [{"name": "tape", "type": "ptr:vbm_json_tape"}, {"name": "opts", "type": "ptr:vbm_json_opts"}, {"name": "out", "type": "ptr:vbm_json_bytes"}]},
+    {"name": "vbm_json_escape_string", "c": "int vbm_json_escape_string(const uint8_t *buf, size_t len, const vbm_json_opts *opts, vbm_json_bytes *out)",
+     "ret": "int",
+     "params": [{"name": "buf", "type": "ptr:u8"}, {"name": "len", "type": "size"}, {"name": "opts", "type": "ptr:vbm_json_opts"}, {"name": "out", "type": "ptr:vbm_json_bytes"}]},
+    {"name": "vbm_json_bytes_free", "c": "void vbm_json_bytes_free(vbm_json_bytes *out)",
+     "ret": "void",
+     "params": [{"name": "out", "type": "ptr:vbm_json_bytes"}]}
   ]
 }

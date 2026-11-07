@@ -118,11 +118,43 @@ def parse(data, number=Number):
         return _read(tape, number)
     finally:
         vbm_json_free(ctypes.byref(tape))
+
+
+def _take(out):
+    """The bytes of a vbm_json_bytes, copied out, and the block released."""
+    try:
+        return ctypes.string_at(out.data, out.len)
+    finally:
+        vbm_json_bytes_free(ctypes.byref(out))
+
+
+def compact(data):
+    """Parse bytes (as parse) and print the tape back with the library's printer: the compact form (no whitespace, numbers as their lexeme, strings escaped minimally). Raises an Error subclass on a non-OK result."""
+    data = bytes(data)
+    tape = vbm_json_tape()
+    rc = vbm_json_parse(ctypes.cast(ctypes.c_char_p(data), ctypes.POINTER(ctypes.c_uint8)), len(data), None, ctypes.byref(tape))
+    if rc != OK: _raise(rc)
+    try:
+        out = vbm_json_bytes()
+        rc = vbm_json_print_tape(ctypes.byref(tape), None, ctypes.byref(out))
+        if rc != OK: _raise(rc)
+        return _take(out)
+    finally:
+        vbm_json_free(ctypes.byref(tape))
+
+
+def escape_string(text):
+    """The JSON string literal (quotes included) of the UTF-8 text (bytes, or str): the library's escaping. Raises JSONSyntaxError for bytes that are not valid UTF-8."""
+    data = text.encode("utf-8") if isinstance(text, str) else bytes(text)
+    out = vbm_json_bytes()
+    rc = vbm_json_escape_string(ctypes.cast(ctypes.c_char_p(data), ctypes.POINTER(ctypes.c_uint8)), len(data), None, ctypes.byref(out))
+    if rc != OK: _raise(rc)
+    return _take(out)
 '''
 
 PY_INIT = '''"""%s"""
-from ._generated import (parse, Error, Number, Object, ABI_VERSION, %s)
-__all__ = ["parse", "Error", "Number", "Object", "ABI_VERSION", %s]
+from ._generated import (parse, compact, escape_string, Error, Number, Object, ABI_VERSION, %s)
+__all__ = ["parse", "compact", "escape_string", "Error", "Number", "Object", "ABI_VERSION", %s]
 '''
 
 def gen_python_init(d):
@@ -232,6 +264,34 @@ pub fn parse(input: &[u8]) -> Result<Value, Error> {
     let (v, end) = node(words, text, 0)?;
     if end != words.len() { return Err(Error::Internal); }
     Ok(v)
+}
+
+struct BytesGuard(vbm_json_bytes);
+impl Drop for BytesGuard {
+    fn drop(&mut self) { unsafe { vbm_json_bytes_free(&mut self.0) } }
+}
+
+fn take(g: &BytesGuard) -> Vec<u8> {
+    if g.0.len == 0 { Vec::new() } else { unsafe { std::slice::from_raw_parts(g.0.data, g.0.len) }.to_vec() }
+}
+
+/// Parse `input` (as `parse`) and print the tape back with the library's printer: the compact form (no whitespace, numbers as their lexeme, strings escaped minimally).
+pub fn compact(input: &[u8]) -> Result<Vec<u8>, Error> {
+    let mut g = Guard(unsafe { std::mem::zeroed() });
+    let rc = unsafe { vbm_json_parse(input.as_ptr(), input.len(), std::ptr::null(), &mut g.0) };
+    if rc != VBM_JSON_OK { return Err(Error::from_code(rc)); }
+    let mut o = BytesGuard(unsafe { std::mem::zeroed() });
+    let rc = unsafe { vbm_json_print_tape(&g.0, std::ptr::null(), &mut o.0) };
+    if rc != VBM_JSON_OK { return Err(Error::from_code(rc)); }
+    Ok(take(&o))
+}
+
+/// The JSON string literal (quotes included) of the UTF-8 text: the library's escaping. `Error::Syntax` for bytes that are not valid UTF-8.
+pub fn escape_string(text: &[u8]) -> Result<Vec<u8>, Error> {
+    let mut o = BytesGuard(unsafe { std::mem::zeroed() });
+    let rc = unsafe { vbm_json_escape_string(text.as_ptr(), text.len(), std::ptr::null(), &mut o.0) };
+    if rc != VBM_JSON_OK { return Err(Error::from_code(rc)); }
+    Ok(take(&o))
 }
 
 fn node(w: &[u64], text: &[u8], i: usize) -> Result<(Value, usize), Error> {

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Tier 1: the FREESTANDING native library (scripts/build_native.sh: the generated C, abi/vbm_json.c and runtime/rt.c, -ffreestanding -nostdlib, no libc) against the Lean reference.
-#   1. Builds it; `nm -u` of the object, the archive's member and the shared library is EMPTY and the only global symbols defined are vbm_json_parse and vbm_json_free.
+#   1. Builds it; `nm -u` of the object, the archive's member and the shared library is EMPTY and the only global symbols defined are the five ABI functions.
 #   2. The shared vectors (vbm-json-vectors-1: JSONTestSuite and the bignum rows included) go through tests/abi_test.c linked against ONLY this library (the whole ABI test: every row, 100000-deep input, the
 #      allocator hook, fault injection, no resident growth), and tests/abi_dump.c's answers (rc and a hash of every tape) are IDENTICAL to the hosted build's (shim + the toolchain's runtime).
 #   3. tests/lean_layout.c: abi/lean_mini.h (the freestanding stand-in for lean.h, used by the shim here and by the scorecard's freestanding compile) agrees with lean.h; tests/native_rt.c: memcpy,
@@ -18,11 +18,11 @@ lib=.lake/build/lib/libvbm_x2djson_LeanJson.a
 scripts/build_native.sh "$tmp/lib" > "$tmp/build.txt"; sed 's/^/test_native: /' "$tmp/build.txt"
 for f in "$tmp/lib/vbm_json.o"; do
   [ -z "$(nm -u "$f")" ] || { echo "test_native: $f has undefined symbols" >&2; exit 1; }
-  [ "$(nm -g --defined-only "$f" | sed 's/^[0-9a-f]* . //' | sort | tr '\n' ' ')" = "vbm_json_free vbm_json_parse " ] || { echo "test_native: $f exports more than the ABI" >&2; nm -g --defined-only "$f" >&2; exit 1; }
+  [ "$(nm -g --defined-only "$f" | sed 's/^[0-9a-f]* . //' | sort | tr '\n' ' ')" = "vbm_json_bytes_free vbm_json_escape_string vbm_json_free vbm_json_parse vbm_json_print_tape " ] || { echo "test_native: $f exports more than the ABI" >&2; nm -g --defined-only "$f" >&2; exit 1; }
 done
 [ -z "$(nm -D -u "$tmp/lib/libvbm_json.so")" ] || { echo "test_native: libvbm_json.so has undefined symbols" >&2; exit 1; }
-[ "$(nm -D --defined-only "$tmp/lib/libvbm_json.so" | sed 's/^[0-9a-f]* . //' | sort | tr '\n' ' ')" = "vbm_json_free vbm_json_parse " ] || { echo "test_native: libvbm_json.so exports more than the ABI" >&2; exit 1; }
-echo "test_native: nm -u is empty for the object and the shared library; the only exports are vbm_json_parse and vbm_json_free"
+[ "$(nm -D --defined-only "$tmp/lib/libvbm_json.so" | sed 's/^[0-9a-f]* . //' | sort | tr '\n' ' ')" = "vbm_json_bytes_free vbm_json_escape_string vbm_json_free vbm_json_parse vbm_json_print_tape " ] || { echo "test_native: libvbm_json.so exports more than the ABI" >&2; exit 1; }
+echo "test_native: nm -u is empty for the object and the shared library; the only exports are the five ABI functions"
 # 2. the vectors against this library only
 v=${VBM_JSON_VECTORS:-}   # tier1 generates the vectors once and shares them; alone, the script generates its own
 [ -n "$v" ] || { .lake/build/bin/vbm-json-vectors --n 4 --out "$tmp/v" >/dev/null; v="$tmp/v/vectors.jsonl"; }

@@ -33,6 +33,9 @@ class vbm_json_opts(ctypes.Structure):
 class vbm_json_tape(ctypes.Structure):
     _fields_ = [("words", ctypes.POINTER(ctypes.c_uint64)), ("nwords", ctypes.c_size_t), ("text", ctypes.POINTER(ctypes.c_uint8)), ("ntext", ctypes.c_size_t), ("block_", ctypes.c_void_p), ("block_size_", ctypes.c_size_t), ("allocator_", vbm_json_allocator)]
 
+class vbm_json_bytes(ctypes.Structure):
+    _fields_ = [("data", ctypes.POINTER(ctypes.c_uint8)), ("len", ctypes.c_size_t), ("block_", ctypes.c_void_p), ("block_size_", ctypes.c_size_t), ("allocator_", vbm_json_allocator)]
+
 _lib = loader.load()
 
 vbm_json_parse = _lib.vbm_json_parse
@@ -42,6 +45,18 @@ vbm_json_parse.restype = ctypes.c_int
 vbm_json_free = _lib.vbm_json_free
 vbm_json_free.argtypes = [ctypes.POINTER(vbm_json_tape)]
 vbm_json_free.restype = None
+
+vbm_json_print_tape = _lib.vbm_json_print_tape
+vbm_json_print_tape.argtypes = [ctypes.POINTER(vbm_json_tape), ctypes.POINTER(vbm_json_opts), ctypes.POINTER(vbm_json_bytes)]
+vbm_json_print_tape.restype = ctypes.c_int
+
+vbm_json_escape_string = _lib.vbm_json_escape_string
+vbm_json_escape_string.argtypes = [ctypes.POINTER(ctypes.c_uint8), ctypes.c_size_t, ctypes.POINTER(vbm_json_opts), ctypes.POINTER(vbm_json_bytes)]
+vbm_json_escape_string.restype = ctypes.c_int
+
+vbm_json_bytes_free = _lib.vbm_json_bytes_free
+vbm_json_bytes_free.argtypes = [ctypes.POINTER(vbm_json_bytes)]
+vbm_json_bytes_free.restype = None
 
 
 class Error(Exception):
@@ -144,4 +159,36 @@ def parse(data, number=Number):
         return _read(tape, number)
     finally:
         vbm_json_free(ctypes.byref(tape))
+
+
+def _take(out):
+    """The bytes of a vbm_json_bytes, copied out, and the block released."""
+    try:
+        return ctypes.string_at(out.data, out.len)
+    finally:
+        vbm_json_bytes_free(ctypes.byref(out))
+
+
+def compact(data):
+    """Parse bytes (as parse) and print the tape back with the library's printer: the compact form (no whitespace, numbers as their lexeme, strings escaped minimally). Raises an Error subclass on a non-OK result."""
+    data = bytes(data)
+    tape = vbm_json_tape()
+    rc = vbm_json_parse(ctypes.cast(ctypes.c_char_p(data), ctypes.POINTER(ctypes.c_uint8)), len(data), None, ctypes.byref(tape))
+    if rc != OK: _raise(rc)
+    try:
+        out = vbm_json_bytes()
+        rc = vbm_json_print_tape(ctypes.byref(tape), None, ctypes.byref(out))
+        if rc != OK: _raise(rc)
+        return _take(out)
+    finally:
+        vbm_json_free(ctypes.byref(tape))
+
+
+def escape_string(text):
+    """The JSON string literal (quotes included) of the UTF-8 text (bytes, or str): the library's escaping. Raises JSONSyntaxError for bytes that are not valid UTF-8."""
+    data = text.encode("utf-8") if isinstance(text, str) else bytes(text)
+    out = vbm_json_bytes()
+    rc = vbm_json_escape_string(ctypes.cast(ctypes.c_char_p(data), ctypes.POINTER(ctypes.c_uint8)), len(data), None, ctypes.byref(out))
+    if rc != OK: _raise(rc)
+    return _take(out)
 
