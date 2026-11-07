@@ -8,7 +8,7 @@
  *   VBM_JSON_ARRAY: len elements follow, each a node. VBM_JSON_OBJECT: len members follow, each a VBM_JSON_STRING node (the key) then a node (the value). Duplicate keys are kept in input order.
  *     aux = the number of words of the whole subtree, this node's two words included (skip a subtree: i += aux).
  *   The tape is the root node and everything inside it (words[0..nwords)). `text` is the concatenation of all texts in document order.
- * MEMORY: the tape and the text are one block obtained from the allocator in vbm_json_opts (default: the library's own heap, a Lean ByteArray: no libc) and released by vbm_json_free. The Lean runtime inside the library
+ * MEMORY: the tape and the text are one block obtained from the allocator in vbm_json_opts (default: the library's own heap: the result's own Lean ByteArray, handed out in place when its words are 8-aligned, else a copy of it: no libc) and released by vbm_json_free. The Lean runtime inside the library
  *   has its own heap for the parse; it is empty again when vbm_json_parse returns. Only the result memory comes from your allocator. A NULL from it is VBM_JSON_NOMEM.
  * THREADS: the first call initialises the Lean runtime (once; an atomic flag, a concurrent first caller waits). Concurrent calls are not yet tested or promised. */
 #ifndef VBM_JSON_H

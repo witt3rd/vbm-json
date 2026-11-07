@@ -1,5 +1,5 @@
 /* abi/vbm_json.c: the C edge of vbm-json (slice 1). TRUSTED, unverified (docs/trust-ledger.md, entry T09). It moves bytes: copies the input into a Lean ByteArray, calls the
- * Lean export vbm_json_parse_tape (LeanJson/Tape.lean: the parse, the policies and the tape layout are decided there), and copies the result into memory from the embedder's allocator.
+ * Lean export vbm_json_parse_tape (LeanJson/Tape.lean: the parse, the policies and the tape layout are decided there), and copies the result into memory from the embedder's allocator (or, with the default allocator, hands the result out in place).
  * Contract: include/vbm_json.h. It decides nothing about JSON. */
 #include "../include/vbm_json.h"
 #if __STDC_HOSTED__
@@ -56,6 +56,11 @@ static void dflt_free_(void *ctx, void *p, size_t n) {
   lean_dec_ref((lean_object *)(d - __builtin_offsetof(lean_sarray_object, m_data)));
 }
 static const vbm_json_allocator dflt_ = { 0, dflt_alloc_, dflt_free_ };
+/* The default allocator, in place: the export's result (24 header bytes, the words, the text) is a Lean ByteArray already, so with the default allocator, a result nobody else holds and the words 8-aligned in its payload
+ * nothing is allocated or copied: the block IS the ByteArray (block_ is the object, not a payload address) and the tape points into it; vbm_json_free releases it with lean_dec_ref. Otherwise (a custom allocator, or a payload
+ * that is only 4-aligned, as on wasm32) the tape is copied into a block as before. */
+static void dflt_free_inplace_(void *ctx, void *p, size_t n) { (void)ctx; (void)n; lean_dec_ref((lean_object *)p); }
+static const vbm_json_allocator dflt_inplace_ = { 0, dflt_alloc_, dflt_free_inplace_ };
 
 static uint64_t word_(const uint8_t *p) { uint64_t w; memcpy(&w, p, 8); return w; }   /* little-endian host */
 
@@ -84,6 +89,13 @@ int vbm_json_parse(const uint8_t *buf, size_t len, const vbm_json_opts *opts, vb
       if (n == 24 && nw == 0 && nt == 0) rc = (int)status;
     } else if (status == 0 && nw <= (n - 24) / 8 && nt <= n && 24 + 8 * nw + nt == n) {
       size_t total = n - 24;                                   /* words, then text: one block */
+      const uint8_t *wp = p + 24;                              /* the words, in the result's payload */
+      if (al == &dflt_ && ((uintptr_t)wp & 7) == 0 && lean_is_exclusive(out)) {   /* in place: ownership of `out` passes to the tape */
+        tape->words = (const uint64_t *)wp; tape->nwords = (size_t)nw;
+        tape->text = wp + 8 * nw; tape->ntext = (size_t)nt;
+        tape->block_ = out; tape->block_size_ = total ? total : 8; tape->allocator_ = dflt_inplace_;
+        return VBM_JSON_OK;
+      }
       void *blk = al->alloc(al->ctx, total ? total : 8);
       if (!blk) rc = VBM_JSON_NOMEM;
       else if ((uintptr_t)blk % 8) { al->free(al->ctx, blk, total ? total : 8); rc = VBM_JSON_ARG; }

@@ -14,7 +14,7 @@ grep -q ' 100.0 over non-equivalent mutants' "$tmp/mut.out" && ran_case || { ech
 # NEGATIVE self-tests of the metric: without the real list the three equivalent mutants are survivors and the run FAILS, and a list entry for a mutant the tests KILL is refused (an entry cannot hide one); an entry
 # with no reason, an expired one and a stale id are each rejected
 : > "$tmp/none.txt"
-printf '%b\n' 'abi/vbm_json.c:65:27:>:>=\tThis one is killed by the length-edge case, so the entry must be refused.\t2027-05-04' > "$tmp/hide.txt"   # a list of ONE entry, for a killed mutant
+printf '%b\n' 'abi/vbm_json.c:70:27:>:>=\tThis one is killed by the length-edge case, so the entry must be refused.\t2027-05-04' > "$tmp/hide.txt"   # a list of ONE entry, for a killed mutant
 if scripts/run-scoped.sh mutants 3600 python3 scripts/mutants.py --jobs "$jobs" --allowlist "$tmp/hide.txt" > "$tmp/mut0.out" 2>&1; then echo "test_mutants: self-test: the mutation run passed with the equivalents unlisted (it cannot fail)" >&2; exit 1; fi
 [ "$(grep -c '^SURVIVES' "$tmp/mut0.out")" = 3 ] && ran_case || { echo "test_mutants: self-test: expected exactly the three equivalent mutants to survive" >&2; cat "$tmp/mut0.out" >&2; exit 1; }
 grep -q 'was KILLED' "$tmp/mut0.out" && ran_case || { echo "test_mutants: self-test: an entry for a killed mutant was not refused" >&2; cat "$tmp/mut0.out" >&2; exit 1; }
@@ -22,8 +22,8 @@ bad_list() {  # bad_list NAME LINE: an equivalence list with that line (after th
   { cat mutants-equivalent.txt; printf '%b\n' "$2"; } > "$tmp/bad.txt"
   must_fail "an equivalence list with $1" scripts/run-scoped.sh mutants 600 python3 scripts/mutants.py --list --allowlist "$tmp/bad.txt"
 }
-bad_list "no reason" 'abi/vbm_json.c:65:27:>:>=\t\t2027-05-04'
-bad_list "an expired entry" 'abi/vbm_json.c:65:27:>:>=\tThis entry is long past its date and must be argued again.\t2020-01-01'
+bad_list "no reason" 'abi/vbm_json.c:70:27:>:>=\t\t2027-05-04'
+bad_list "an expired entry" 'abi/vbm_json.c:70:27:>:>=\tThis entry is long past its date and must be argued again.\t2020-01-01'
 bad_list "a stale id" 'abi/vbm_json.c:999:0:>:>=\tNo such mutant: the line does not exist in the shim.\t2027-05-04'
 ran_done test_mutants
 echo "test_mutants: ok (the whole-shim mutation run is 100 over the non-equivalent mutants and fails without the list)"

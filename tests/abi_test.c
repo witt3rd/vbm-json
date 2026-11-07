@@ -129,20 +129,19 @@ typedef struct { long live, calls; long fail_at; size_t last; } counting;
 static void *c_alloc(void *ctx, size_t n) { counting *c = ctx; c->calls++; if (c->fail_at && c->calls >= c->fail_at) return NULL; c->live++; c->last = n; return malloc(n); }
 static void c_free(void *ctx, void *p, size_t n) { counting *c = ctx; c->live--; if (n != c->last) c->live += 1000000; free(p); }
 
-/* The default allocator's block (no allocator given): inside a Lean ByteArray payload, 8-aligned, the byte before it is its distance back to the payload's start (1..8), the payload holds the block and 8 more bytes. */
+/* The default allocator's block (no allocator given), on a 64-bit host: the export's result ByteArray itself, in place. block_ is the object; the words start 24 bytes into its payload (8-aligned), the text follows them, and the
+ * ByteArray is exactly the 24 header bytes, the words and the text (its header says so); vbm_json_free releases the object. (Where the payload is only 4-aligned, wasm32, the library copies as for a custom allocator.) */
 static void default_block(void) {
   vbm_json_tape t;
   if (vbm_json_parse(samp, samp_n, NULL, &t) != VBM_JSON_OK) { fail("the default allocator did not parse", "default", 0); return; }
-  const unsigned char *blk = t.block_; unsigned delta = blk[-1]; int found = 0;
-  if ((uintptr_t)blk % 8) fail("the default block is not 8-aligned", "default", 0);
-  if (delta < 1 || delta > 8) fail("the default block's distance byte is outside 1..8", "default", delta);
-  else {
-    lean_sarray_object *o = (lean_sarray_object *)(blk - delta - offsetof(lean_sarray_object, m_data));
-    found = o->m_header.m_tag == LeanScalarArray && o->m_size == t.block_size_ + 8 && o->m_capacity == t.block_size_ + 8 && lean_sarray_cptr((lean_object *)o) == blk - delta;
+  lean_object *o = t.block_; int found = 0;
+  if ((uintptr_t)t.words % 8) fail("the default words are not 8-aligned", "default", 0);
+  if (o && o->m_tag == LeanScalarArray) {
+    const unsigned char *pl = lean_sarray_cptr(o); uint64_t st, nw, nt; memcpy(&st, pl, 8); memcpy(&nw, pl + 8, 8); memcpy(&nt, pl + 16, 8);
+    found = lean_sarray_size(o) == 24 + 8 * t.nwords + t.ntext && st == 0 && nw == t.nwords && nt == t.ntext && (const unsigned char *)t.words == pl + 24 && t.text == (const uint8_t *)t.words + 8 * t.nwords;
   }
-  if (!found) fail("the default block is not the payload of a ByteArray of its size plus 8", "default", 0);
+  if (!found) fail("the default block is not the result ByteArray with the tape pointing into it", "default", 0);
   if (found) {   /* freeing must release exactly that ByteArray: hold a second reference, free, and see the count back at one */
-    lean_object *o = (lean_object *)(blk - delta - offsetof(lean_sarray_object, m_data));
     vbm_json_tape t2 = t;   /* the second reference is released by the library itself (its runtime may not be the one this test links) */
     lean_inc_ref(o); vbm_json_free(&t);
     if (!lean_is_exclusive(o)) fail("vbm_json_free did not release the block's ByteArray", "default", 0);
@@ -182,6 +181,8 @@ lean_object *fx_export(lean_object *in) { lean_dec_ref(in); lean_object *o = lea
 lean_object *fx_init(uint8_t builtin) { (void)builtin; return lean_io_result_mk_ok(lean_box(0)); }
 static lean_object *fx_alloc_sarray(unsigned elem, size_t size, size_t cap) { return lean_alloc_sarray(elem, size > 4096 ? 0 : size, size > 4096 ? 0 : cap); }
 static void *fx_memcpy(void *d, const void *s, size_t n) { return n > 4096 ? d : memcpy(d, s, n); }
+static int fx_copy;   /* 1: the copy of the shim sees every result as shared, so that the default allocator's copying path (the one used where the payload is only 4-aligned) is exercised on this host too */
+#define lean_is_exclusive(o) (!fx_copy && lean_is_exclusive(o))
 #define vbm_json_parse fx_parse
 #define vbm_json_free fx_free
 #define vbm_json_parse_tape fx_export
@@ -195,6 +196,7 @@ static void *fx_memcpy(void *d, const void *s, size_t n) { return n > 4096 ? d :
 #undef vbm_json_parse_tape
 #undef vbm_json_free
 #undef vbm_json_parse
+#undef lean_is_exclusive
 
 /* a result of n bytes whose header says (status, nw, nt) and whose payload is a known pattern; returns the shim's code and, when it accepted, checks the block it built */
 static int fx_case(uint64_t status, uint64_t nw, uint64_t nt, size_t n, vbm_json_opts *opts) {
@@ -204,7 +206,18 @@ static int fx_case(uint64_t status, uint64_t nw, uint64_t nt, size_t n, vbm_json
   int rc = fx_parse(&in, 1, opts, &t);
   if (rc == VBM_JSON_OK) {
     if (!t.words || t.nwords != nw || t.ntext != nt || memcmp(t.words, r + 24, 8 * nw) || memcmp(t.text, r + 24 + 8 * nw, nt) || t.text != (const uint8_t *)t.words + 8 * nw) fail("an accepted header built a wrong tape", "fault", n);
-    fx_free(&t);
+    if (!opts && fx_copy) {   /* the default allocator's copying path: the block is inside a ByteArray payload, 8-aligned, the byte before it is its distance back (1..8), the payload holds the block and 8 more bytes; freeing releases that ByteArray */
+      const unsigned char *blk = t.block_; unsigned delta = blk[-1];
+      if ((uintptr_t)blk % 8 || delta < 1 || delta > 8) { fail("the default block is not 8-aligned or its distance byte is outside 1..8", "fault", n); fx_free(&t); }
+      else {
+        lean_sarray_object *o = (lean_sarray_object *)(blk - delta - offsetof(lean_sarray_object, m_data));
+        if (!(o->m_header.m_tag == LeanScalarArray && o->m_size == t.block_size_ + 8 && o->m_capacity == t.block_size_ + 8 && lean_sarray_cptr((lean_object *)o) == blk - delta)) fail("the default block is not the payload of a ByteArray of its size plus 8", "fault", n);
+        vbm_json_tape t2 = t;   /* hold a second reference: after the free the count must be back at one */
+        lean_inc_ref((lean_object *)o); fx_free(&t);
+        if (!lean_is_exclusive((lean_object *)o)) fail("vbm_json_free did not release the block's ByteArray", "fault", n);
+        fx_free(&t2);
+      }
+    } else fx_free(&t);
   } else if (t.words || t.text || t.nwords || t.ntext) fail("a refused header left a tape", "fault", n);
   return rc;
 }
@@ -225,6 +238,7 @@ static void fault(void) {
   const uint64_t sts[] = { 0, 1, 2, 3, UINT64_MAX }, nws[] = { 0, 1, 2, 3, 5, UINT64_MAX / 8 + 1, UINT64_MAX / 8 + 2, UINT64_MAX / 8, UINT64_MAX },
                  nts[] = { 0, 1, 2, 3, 5, 7, 9, 16, UINT64_MAX - 15, UINT64_MAX - 7, UINT64_MAX };
   size_t cases = 0, ok = 0;
+  for (fx_copy = 0; fx_copy < 2; fx_copy++)   /* once with the default allocator in place, once with it copying */
   for (size_t a = 0; a < sizeof sts / 8; a++) for (size_t b = 0; b < sizeof nws / 8; b++) for (size_t c = 0; c < sizeof nts / 8; c++) {
     size_t ns[16], k = 0;
     ns[k++] = 0; ns[k++] = 23; ns[k++] = 24; ns[k++] = 25; ns[k++] = 32; ns[k++] = 40;
@@ -236,6 +250,7 @@ static void fault(void) {
       if (got != want) fail("the shim's verdict on a crafted export result differs from the layout contract", "fault", cases);
     }
   }
+  fx_copy = 0;
   if (ok < 20) fail("the enumeration reached too few accepted headers", "fault", ok);
   /* the block asked of the embedder is the words and the text and not a byte more (an empty tape asks for 8) */
   counting c = {0}; vbm_json_allocator al = { &c, c_alloc, c_free }; vbm_json_opts o = { sizeof o, &al };

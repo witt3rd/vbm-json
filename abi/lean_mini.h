@@ -23,5 +23,6 @@ static inline lean_object *lean_alloc_sarray(unsigned elem_size, size_t size, si
 static inline uint8_t *lean_sarray_cptr(lean_object *o) { return ((lean_sarray_object *)o)->m_data; }
 static inline size_t lean_sarray_size(lean_object *o) { return ((lean_sarray_object *)o)->m_size; }
 static inline void lean_dec_ref(lean_object *o) { if (o->m_rc > 1) o->m_rc--; else if (o->m_rc != 0) lean_dec_ref_cold(o); }
+static inline int lean_is_exclusive(lean_object *o) { return o->m_rc == 1; }
 static inline int lean_io_result_is_ok(lean_object *r) { return r->m_tag == 0; }
 #endif

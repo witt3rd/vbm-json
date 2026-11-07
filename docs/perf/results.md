@@ -305,3 +305,18 @@ Through the C ABI as before (A = main at `3affd0c`, B = this slice; best of 12 r
 | small-objects | 2412355 | 247.0 | 274.1 | 1.11 |
 | string-heavy | 2915939 | 589.8 | 602.1 | 1.02 |
 | twitter | 631515 | 578.1 | 603.3 | 1.04 |
+
+## Round three, slice 4: the result handed out in place (the ABI shim)
+
+The shim (`abi/vbm_json.c`, T09) copied the Lean result (the header, the tape, the text: 2.5 to 4 times the input) into a block of the default allocator, which is itself a Lean `ByteArray`: a second allocation (first-touch page faults on fresh memory) and a second copy of everything the parse had written. With the default allocator, a result nobody else holds and the words 8-aligned in its payload, the shim now hands the result `ByteArray` itself out: `tape->words` and `tape->text` point into it, `vbm_json_free` releases it with `lean_dec_ref`. A custom allocator, a shared result, or a payload that is only 4-aligned (wasm32) copies as before. The Lean side is unchanged (no theorem moves); the shim's tests were rewritten for the new layout (the block is the object; the sizes in its header against the tape; the fault enumeration of the shim's checks runs once in place and once with the copy forced, so the old block layout stays exercised), `lean_mini.h` gained `lean_is_exclusive` (checked against `lean.h`'s in `tests/lean_layout.c`), and the whole-shim mutation metric (Tier 2, `scripts/mutants.py`) is 100 over the non-equivalent mutants. Not done: the input is still copied into a Lean `ByteArray` (a Lean object cannot wrap the caller's buffer), and `finishW` still copies the tape and the text into the result (writing the tape in place needs the array's size to be exact at the end, which no runtime call offers without a copy).
+
+Through the C ABI as before (A = main at `5759575`, B = this slice; best of 12 rounds of one window of 0.2 s, pinned to CPU 8 of host x; **load 6.6 before and 6.7 after (another tenant busy on the host: CPU 9, the sibling of 8, was at 72% at the start)**):
+
+| corpus | bytes | MB/s A | MB/s B | B / A |
+|---|---|---|---|---|
+| canada | 2251051 | 443.0 | 465.2 | 1.05 |
+| citm_catalog | 1727204 | 921.6 | 947.5 | 1.03 |
+| scorecard corpus | 1033424 | 365.6 | 385.4 | 1.05 |
+| small-objects | 2412355 | 223.9 | 258.0 | 1.15 |
+| string-heavy | 2915939 | 508.9 | 532.1 | 1.05 |
+| twitter | 631515 | 477.0 | 492.2 | 1.03 |

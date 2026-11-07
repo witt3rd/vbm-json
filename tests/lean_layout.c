@@ -19,6 +19,7 @@ static const size_t real_tag = LeanScalarArray, real_max = LEAN_MAX_SMALL_NAT;
 #define lean_sarray_size mini_sarray_size
 #define lean_dec_ref mini_dec_ref
 #define lean_io_result_is_ok mini_io_result_is_ok
+#define lean_is_exclusive mini_is_exclusive
 #include "../abi/lean_mini.h"
 static const size_t mini_tag = LeanScalarArray, mini_max = LEAN_MAX_SMALL_NAT;
 #undef lean_object
@@ -34,6 +35,7 @@ static const size_t mini_tag = LeanScalarArray, mini_max = LEAN_MAX_SMALL_NAT;
 #undef lean_sarray_size
 #undef lean_dec_ref
 #undef lean_io_result_is_ok
+#undef lean_is_exclusive
 
 /* the mini header calls these (renamed) externs: route them to the real runtime */
 mini_object *mini_alloc_object_extern(size_t sz) { return (mini_object *)lean_alloc_object(sz); }
@@ -64,9 +66,11 @@ int main(void) {
     lean_object *ok = lean_io_result_mk_ok(lean_box(0)), *er = lean_io_result_mk_error(lean_box(0));
     CHECK(mini_io_result_is_ok((mini_object *)ok) == 1 && mini_io_result_is_ok((mini_object *)er) == 0, "io_result_is_ok");
     lean_dec_ref(ok); lean_dec_ref(er);
+    for (int rc = -2; rc <= 3; rc++) { a->m_rc = b->m_rc = rc; CHECK(lean_is_exclusive(a) == mini_is_exclusive(b), "is_exclusive (counts -2 to 3: single-threaded, unshared, shared, persistent, multi-threaded)"); }
+    a->m_rc = b->m_rc = 1;
     mini_dec_ref(b); lean_dec_ref(a);   /* the count logic: a count of 1 is released through the cold path of the real runtime */
   }
   if (bad) return 1;
-  printf("lean_layout: lean_mini.h agrees with lean.h (layout, tag, limit, sarray header and size, io-result test, release)\n");
+  printf("lean_layout: lean_mini.h agrees with lean.h (layout, tag, limit, sarray header and size, io-result test, exclusiveness, release)\n");
   return 0;
 }
