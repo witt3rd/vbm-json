@@ -120,6 +120,13 @@ def zeros4k : ByteArray := zeroBytes 4096
 /-- The header word of a node: `kind` (a literal below 256) and `len` (`pushWord` of `kind + len * 256`, `hdrW_eq`). -/
 @[inline] def hdrW (kind : UInt64) (len : Nat) : UInt64 := UInt64.ofNat len * 256 + kind
 
+/-- `hdrW`, with the count as a word. -/
+@[inline] def hdrWu (kind : UInt64) (len : UInt64) : UInt64 := len * 256 + kind
+
+/-- The two stores that close a container whose header is at word `at_`: its header word `h` (kind and count) and its subtree size, `tw - at_` words (`0` if `at_` is past `tw`, as `Nat` subtraction is). -/
+@[inline] def closeU (tape : ByteArray) (at_ tw : USize) (h : UInt64) : ByteArray :=
+  st64 (st64 tape at_ h) (at_ + 1) (if at_ ≤ tw then (tw - at_).toUInt64 else 0)
+
 /-- The two words of a node stored at word index `w` of the tape. -/
 @[inline] def putNode (t : ByteArray) (w : Nat) (h x : UInt64) : ByteArray := st64 (st64 (ensureTape t w) w.toUSize h) (w + 1).toUSize x
 
@@ -762,25 +769,25 @@ decreasing_by
   else none
 
 /-- `runU` with the cursor `(w, b)` in place of the position (`i` is the position it stands at: `curPosU`). -/
-def runC (m : ByteArray) (f : USize) (a : ByteArray) (w : USize) (b : UInt64) (i : USize) (ret : Bool) (tape : ByteArray) (tw : USize) (text : ByteArray) (fst : FStack) (d : USize) : Option ByteArray :=
+def runC (m : ByteArray) (f : USize) (a : ByteArray) (w : USize) (b : UInt64) (i : USize) (ret : Bool) (tape : ByteArray) (tw : USize) (text : ByteArray) (stk : ByteArray) (sp : USize) (d : USize) : Option ByteArray :=
   if f == 0 then none else
   let f1 := f - 1
   let sz := a.usize
-  match ret, fst with
-  | false, fst =>
+  match ret with
+  | false =>
     if h : i < a.usize then
       let c := a.uget i (ugetOk a i h)
       if c == 0x5B then
         if d == 0 then none
         else
           advK m sz w b fun w1 b1 i1 =>
-          if byteIsU a i1 0x5D then advK m sz w1 b1 fun w2 b2 i2 => runC m f1 a w2 b2 i2 true (putNodeU tape tw (hdrW 5 0) 2) (tw + 2) text fst d
-          else runC m f1 a w1 b1 i1 false (putNodeU tape tw (hdrW 5 0) 0) (tw + 2) text (.arr tw.toNat 0 fst) (d - 1)
+          if byteIsU a i1 0x5D then advK m sz w1 b1 fun w2 b2 i2 => runC m f1 a w2 b2 i2 true (putNodeU tape tw (hdrW 5 0) 2) (tw + 2) text stk sp d
+          else runC m f1 a w1 b1 i1 false (putNodeU tape tw (hdrW 5 0) 0) (tw + 2) text (putNodeU stk (sp <<< 1) (tw.toUInt64 * 2) 0) (sp + 1) (d - 1)
       else if c == 0x7B then
         if d == 0 then none
         else
           advK m sz w b fun w1 b1 i1 =>
-          if byteIsU a i1 0x7D then advK m sz w1 b1 fun w2 b2 i2 => runC m f1 a w2 b2 i2 true (putNodeU tape tw (hdrW 6 0) 2) (tw + 2) text fst d
+          if byteIsU a i1 0x7D then advK m sz w1 b1 fun w2 b2 i2 => runC m f1 a w2 b2 i2 true (putNodeU tape tw (hdrW 6 0) 2) (tw + 2) text stk sp d
           else
             let tape := putNodeU tape tw (hdrW 6 0) 0
             let o := text.size
@@ -789,26 +796,26 @@ def runC (m : ByteArray) (f : USize) (a : ByteArray) (w : USize) (b : UInt64) (i
             | some (text', _) =>
               advK m sz w2 b2 fun w3 b3 i3 =>
               if byteIsU a i3 0x3A then
-                advK m sz w3 b3 fun w4 b4 i4 => runC m f1 a w4 b4 i4 false (putNodeU tape (tw + 2) (hdrW 4 (text'.size - o)) (UInt64.ofNat o)) (tw + 4) text' (.obj tw.toNat 0 fst) (d - 1)
+                advK m sz w3 b3 fun w4 b4 i4 => runC m f1 a w4 b4 i4 false (putNodeU tape (tw + 2) (hdrW 4 (text'.size - o)) (UInt64.ofNat o)) (tw + 4) text' (putNodeU stk (sp <<< 1) (tw.toUInt64 * 2 + 1) 0) (sp + 1) (d - 1)
               else none
             | none => none
       else if c == 0x22 then
         let o := text.size
         advK m sz w b fun w1 b1 i1 =>
         match strC a i i1 text with
-        | some (text', _) => advK m sz w1 b1 fun w2 b2 i2 => runC m f1 a w2 b2 i2 true (putNodeU tape tw (hdrW 4 (text'.size - o)) (UInt64.ofNat o)) (tw + 2) text' fst d
+        | some (text', _) => advK m sz w1 b1 fun w2 b2 i2 => runC m f1 a w2 b2 i2 true (putNodeU tape tw (hdrW 4 (text'.size - o)) (UInt64.ofNat o)) (tw + 2) text' stk sp d
         | none => none
       else if c == 0x6E then
         if byteIsU a (i + 1) 0x75 && byteIsU a (i + 2) 0x6C && byteIsU a (i + 3) 0x6C then
-          if delimAtU a (i + 4) then advK m sz w b fun w1 b1 i1 => if i1 < i + 4 then none else runC m f1 a w1 b1 i1 true (putNodeU tape tw (hdrW 0 0) 0) (tw + 2) text fst d else none
+          if delimAtU a (i + 4) then advK m sz w b fun w1 b1 i1 => if i1 < i + 4 then none else runC m f1 a w1 b1 i1 true (putNodeU tape tw (hdrW 0 0) 0) (tw + 2) text stk sp d else none
         else none
       else if c == 0x74 then
         if byteIsU a (i + 1) 0x72 && byteIsU a (i + 2) 0x75 && byteIsU a (i + 3) 0x65 then
-          if delimAtU a (i + 4) then advK m sz w b fun w1 b1 i1 => if i1 < i + 4 then none else runC m f1 a w1 b1 i1 true (putNodeU tape tw (hdrW 2 0) 0) (tw + 2) text fst d else none
+          if delimAtU a (i + 4) then advK m sz w b fun w1 b1 i1 => if i1 < i + 4 then none else runC m f1 a w1 b1 i1 true (putNodeU tape tw (hdrW 2 0) 0) (tw + 2) text stk sp d else none
         else none
       else if c == 0x66 then
         if byteIsU a (i + 1) 0x61 && byteIsU a (i + 2) 0x6C && byteIsU a (i + 3) 0x73 && byteIsU a (i + 4) 0x65 then
-          if delimAtU a (i + 5) then advK m sz w b fun w1 b1 i1 => if i1 < i + 5 then none else runC m f1 a w1 b1 i1 true (putNodeU tape tw (hdrW 1 0) 0) (tw + 2) text fst d else none
+          if delimAtU a (i + 5) then advK m sz w b fun w1 b1 i1 => if i1 < i + 5 then none else runC m f1 a w1 b1 i1 true (putNodeU tape tw (hdrW 1 0) 0) (tw + 2) text stk sp d else none
         else none
       else
         scanNumK a i fun j bad =>
@@ -817,28 +824,33 @@ def runC (m : ByteArray) (f : USize) (a : ByteArray) (w : USize) (b : UInt64) (i
           let o := text.size
           let text' := if bad then pushLex a i.toNat j.toNat text else appendBytes text a i (j - i)
           advK m sz w b fun w1 b1 i1 => if i1 < j then none else
-          runC m f1 a w1 b1 i1 true (putNodeU tape tw (hdrW 3 (text'.size - o)) (UInt64.ofNat o)) (tw + 2) text' fst d
+          runC m f1 a w1 b1 i1 true (putNodeU tape tw (hdrW 3 (text'.size - o)) (UInt64.ofNat o)) (tw + 2) text' stk sp d
         else none
     else none
-  | true, .nil => if a.usize ≤ i then some (finishW tape text tw.toNat) else none
-  | true, .arr at_ n rest =>
-    if byteIsU a i 0x2C then advK m sz w b fun w1 b1 i1 => runC m f1 a w1 b1 i1 false tape tw text (.arr at_ (n + 1) rest) d
-    else if byteIsU a i 0x5D then advK m sz w b fun w1 b1 i1 => runC m f1 a w1 b1 i1 true (st64 (st64 tape at_.toUSize (hdrW 5 (n + 1))) (at_ + 1).toUSize (UInt64.ofNat (tw.toNat - at_))) tw text rest (d + 1)
-    else none
-  | true, .obj at_ n rest =>
-    if byteIsU a i 0x2C then
-      let o := text.size
-      advK m sz w b fun w1 b1 i1 =>
-      advK m sz w1 b1 fun w2 b2 i2 =>
-      match strC a i1 i2 text with
-      | some (text', _) =>
-        advK m sz w2 b2 fun w3 b3 i3 =>
-        if byteIsU a i3 0x3A then
-          advK m sz w3 b3 fun w4 b4 i4 => runC m f1 a w4 b4 i4 false (putNodeU tape tw (hdrW 4 (text'.size - o)) (UInt64.ofNat o)) (tw + 2) text' (.obj at_ (n + 1) rest) d
+  | true =>
+    if sp == 0 then (if a.usize ≤ i then some (finishW tape text tw.toNat) else none)
+    else
+      let top := (sp - 1) <<< 1
+      let w0 := ld64 stk (top <<< 3)
+      let n := ld64 stk ((top + 1) <<< 3)
+      if (w0 &&& 1) == 0 then
+        if byteIsU a i 0x2C then advK m sz w b fun w1 b1 i1 => runC m f1 a w1 b1 i1 false tape tw text (st64 stk (top + 1) (n + 1)) sp d
+        else if byteIsU a i 0x5D then advK m sz w b fun w1 b1 i1 => runC m f1 a w1 b1 i1 true (closeU tape (w0 >>> 1).toUSize tw (hdrWu 5 (n + 1))) tw text stk (sp - 1) (d + 1)
         else none
-      | none => none
-    else if byteIsU a i 0x7D then advK m sz w b fun w1 b1 i1 => runC m f1 a w1 b1 i1 true (st64 (st64 tape at_.toUSize (hdrW 6 (n + 1))) (at_ + 1).toUSize (UInt64.ofNat (tw.toNat - at_))) tw text rest (d + 1)
-    else none
+      else
+        if byteIsU a i 0x2C then
+          let o := text.size
+          advK m sz w b fun w1 b1 i1 =>
+          advK m sz w1 b1 fun w2 b2 i2 =>
+          match strC a i1 i2 text with
+          | some (text', _) =>
+            advK m sz w2 b2 fun w3 b3 i3 =>
+            if byteIsU a i3 0x3A then
+              advK m sz w3 b3 fun w4 b4 i4 => runC m f1 a w4 b4 i4 false (putNodeU tape tw (hdrW 4 (text'.size - o)) (UInt64.ofNat o)) (tw + 2) text' (st64 stk (top + 1) (n + 1)) sp d
+            else none
+          | none => none
+        else if byteIsU a i 0x7D then advK m sz w b fun w1 b1 i1 => runC m f1 a w1 b1 i1 true (closeU tape (w0 >>> 1).toUSize tw (hdrWu 6 (n + 1))) tw text stk (sp - 1) (d + 1)
+        else none
 termination_by f.toNat
 decreasing_by all_goals exact fuel_dec f ‹_›
 
@@ -876,7 +888,7 @@ def initTape (cap : Nat) : ByteArray :=
 @[export vbm_json_parse_tape] def parseTapeSimd (a : ByteArray) : ByteArray :=
   if a.size < simdLimit then
     let m := stage1Fast a
-    match (startK m a.usize fun w0 b0 i0 => runC m (a.usize + 2) a w0 b0 i0 false (initTape (tapeHint m)) 0 (ByteArray.emptyWithCapacity a.size) .nil maxDepth.toUSize) with
+    match (startK m a.usize fun w0 b0 i0 => runC m (a.usize + 2) a w0 b0 i0 false (initTape (tapeHint m)) 0 (ByteArray.emptyWithCapacity a.size) (initTape 8192) 0 maxDepth.toUSize) with
     | some t => t
     | none => parseTapeFast a
   else parseTapeFast a

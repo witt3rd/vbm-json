@@ -1,6 +1,7 @@
 import LeanJsonProofs.ParseU
 import LeanJsonProofs.NumFlag
 import LeanJsonProofs.StrU
+import LeanJsonProofs.Stack
 /-! # Proof: `runC` (the structural mask carried as a cursor) answers only what `runU` answers (`runC_sound`)
 
 `LeanJsonSimd/ParseSimd.lean`, `runC`. `CurInv m w b lo` says that the cursor `(w, b)` stands at the position `lo`: `b` is the part of word `w` of the mask that lies at or after `lo`, and no bit of the mask is set between `lo` and the word. Then the
@@ -504,10 +505,10 @@ theorem usize_add_k (a : ByteArray) (hs : a.size < 2 ^ 26) (i : USize) (k : Nat)
   usize_add_lit i k (by omega) (by have := usize_ge32; omega)
 
 theorem runC_sound (a : ByteArray) (hsz : a.size < 2 ^ 26) :
-    ∀ (f : Nat) (fu : USize) (w : USize) (b : UInt64) (i iU : USize) (ret : Bool) (tape : ByteArray) (tw : USize) (text : ByteArray) (fst : FStack) (d : USize) (t : ByteArray),
-      fu.toNat = f → iU.toNat ≤ a.size → tw.toNat + 4 * f ≤ 4 * a.size + 8 → tape.size ≤ 8 * tw.toNat + 4096 → d.toNat + fsLen fst ≤ 512 →
+    ∀ (f : Nat) (fu : USize) (w : USize) (b : UInt64) (i iU : USize) (ret : Bool) (tape : ByteArray) (tw : USize) (text : ByteArray) (fst : FStack) (stk : ByteArray) (sp : USize) (d : USize) (t : ByteArray),
+      fu.toNat = f → iU.toNat ≤ a.size → tw.toNat + 4 * f ≤ 4 * a.size + 8 → tape.size ≤ 8 * tw.toNat + 4096 → d.toNat + fsLen fst ≤ 512 → SInv stk sp fst →
       CRel a (stage1 a) w b i iU.toNat → (ret = false → iU = i) →
-      runC (stage1 a) fu a w b i ret tape tw text fst d = some t →
+      runC (stage1 a) fu a w b i ret tape tw text stk sp d = some t →
       runU (stage1 a) fu a iU ret tape tw text fst d = some t := by
   have hM := maskOk_stage1 a hsz
   have hs31 : a.size < 2 ^ 31 := by omega
@@ -515,12 +516,12 @@ theorem runC_sound (a : ByteArray) (hsz : a.size < 2 ^ 26) :
   intro f
   induction f with
   | zero =>
-    intro fu w b i iU ret tape tw text fst d t hf _ _ _ _ _ _ h
+    intro fu w b i iU ret tape tw text fst stk sp d t hf _ _ _ _ _ _ _ h
     rw [runC] at h
     have h0 : (fu == 0) = true := (usize_beq_zero fu).2 hf
     simp [h0] at h
   | succ f ih =>
-    intro fu w b i iU ret tape tw text fst d t hf hi htw htape hd hr hiU h
+    intro fu w b i iU ret tape tw text fst stk sp d t hf hi htw htape hd hS hr hiU h
     have hfu : ¬ (fu == 0) = true := fun h0 => by have := (usize_beq_zero fu).1 h0; omega
     have hf1 : (fu - 1).toNat = f := by
       have h3 : (1 : USize) ≤ fu := by rw [USize.le_iff_toNat_le, usize_lit 1 (by decide)]; omega
@@ -564,12 +565,13 @@ theorem runC_sound (a : ByteArray) (hsz : a.size < 2 ^ 26) :
               generalize curPosU a.usize w2 b2 = i2 at hk2 hq1 hq2 hq3 hr2 hr2s h
               obtain ⟨pe2, -, pe4⟩ := pnU a hsz tape tw (by omega) htape (hdrW 5 0) 2
               have hi2 := add_one a i1 (by omega) hsz
-              exact ih (fu - 1) w2 b2 i2 (i1 + 1) true _ (tw + 2) text fst d t hf1 (by rw [hi2]; omega) (by rw [pe3]; omega) (by rw [pe2, pe3]; exact pe4) hd
+              exact ih (fu - 1) w2 b2 i2 (i1 + 1) true _ (tw + 2) text fst stk sp d t hf1 (by rw [hi2]; omega) (by rw [pe3]; omega) (by rw [pe2, pe3]; exact pe4) hd hS
                 (by rw [hi2]; exact hr2) (fun h => by simp at h) h
             · simp only [h5d, Bool.false_eq_true, ↓reduceIte] at h ⊢
               obtain ⟨pe2, -, pe4⟩ := pnU a hsz tape tw (by omega) htape (hdrW 5 0) 0
-              exact ih (fu - 1) w1 b1 i1 i1 false _ (tw + 2) text _ (d - 1) t hf1 hp3 (by rw [pe3]; omega) (by rw [pe2, pe3]; exact pe4)
-                (by rw [hdd d hd0, fsLen_arr]; have : d.toNat ≠ 0 := fun h0 => hd0 ((usize_beq_zero d).2 h0); omega) hr1s (fun _ => rfl) h
+              have hdpos : d.toNat ≠ 0 := fun h0 => hd0 ((usize_beq_zero d).2 h0)
+              exact ih (fu - 1) w1 b1 i1 i1 false _ (tw + 2) text _ _ _ (d - 1) t hf1 hp3 (by rw [pe3]; omega) (by rw [pe2, pe3]; exact pe4)
+                (by rw [hdd d hd0, fsLen_arr]; omega) (SInv_push_arr stk sp fst hS (by have := hS.1; omega) tw (by omega)) hr1s (fun _ => rfl) h
         · simp only [h5b, Bool.false_eq_true, ↓reduceIte] at h ⊢
           by_cases h7b : (a[iU.toNat] == 0x7B) = true
           · simp only [h7b, ↓reduceIte] at h ⊢
@@ -588,7 +590,7 @@ theorem runC_sound (a : ByteArray) (hsz : a.size < 2 ^ 26) :
                 generalize curPosU a.usize w2 b2 = i2 at hk2 hq1 hq2 hq3 hr2 hr2s h
                 obtain ⟨pe2, -, pe4⟩ := pnU a hsz tape tw (by omega) htape (hdrW 6 0) 2
                 have hi2 := add_one a i1 (by omega) hsz
-                exact ih (fu - 1) w2 b2 i2 (i1 + 1) true _ (tw + 2) text fst d t hf1 (by rw [hi2]; omega) (by rw [pe3]; omega) (by rw [pe2, pe3]; exact pe4) hd
+                exact ih (fu - 1) w2 b2 i2 (i1 + 1) true _ (tw + 2) text fst stk sp d t hf1 (by rw [hi2]; omega) (by rw [pe3]; omega) (by rw [pe2, pe3]; exact pe4) hd hS
                   (by rw [hi2]; exact hr2) (fun h => by simp at h) h
               · simp only [h7d, Bool.false_eq_true, ↓reduceIte] at h ⊢
                 obtain ⟨pe2, -, pe4⟩ := pnU a hsz tape tw (by omega) htape (hdrW 6 0) 0
@@ -631,8 +633,9 @@ theorem runC_sound (a : ByteArray) (hsz : a.size < 2 ^ 26) :
                       obtain ⟨pf2, pf3, pf4⟩ := pnU a hsz (putNodeU tape tw (hdrW 6 0) 0) (tw + 2) (by omega) (by rw [pe2, pe3]; exact pe4)
                         (hdrW 4 (text'.size - text.size)) (UInt64.ofNat text.size)
                       have pe5 : (tw + 4).toNat = tw.toNat + 4 := usize_add_lit tw 4 (by decide) (by have := usize_ge32; omega)
-                      exact ih (fu - 1) w4 b4 i4 i4 false _ (tw + 4) text' _ (d - 1) t hf1 hu3 (by rw [pe5]; omega)
-                        (by rw [pf2, pe2, pe5, pe3]; rw [pe2, pe3] at pf4; omega) (by rw [hdd d hd0, fsLen_obj]; omega) hr4s (fun _ => rfl) h
+                      exact ih (fu - 1) w4 b4 i4 i4 false _ (tw + 4) text' _ _ _ (d - 1) t hf1 hu3 (by rw [pe5]; omega)
+                        (by rw [pf2, pe2, pe5, pe3]; rw [pe2, pe3] at pf4; omega) (by rw [hdd d hd0, fsLen_obj]; omega)
+                        (SInv_push_obj stk sp fst hS (by have := hS.1; omega) tw (by omega)) hr4s (fun _ => rfl) h
                     · simp only [hc3, Bool.false_eq_true, ↓reduceIte] at h
                       simp at h
                 · exfalso
@@ -656,7 +659,7 @@ theorem runC_sound (a : ByteArray) (hsz : a.size < 2 ^ 26) :
                 rw [hk2] at h
                 generalize curPosU a.usize w2 b2 = i2 at hk2 hq1 hq2 hq3 hr2 hr2s h
                 obtain ⟨pe2, -, pe4⟩ := pnU a hsz tape tw (by omega) htape (hdrW 4 (text'.size - text.size)) (UInt64.ofNat text.size)
-                exact ih (fu - 1) w2 b2 i2 j true _ (tw + 2) text' fst d t hf1 (by omega) (by rw [pe3]; omega) (by rw [pe2, pe3]; exact pe4) hd
+                exact ih (fu - 1) w2 b2 i2 j true _ (tw + 2) text' fst stk sp d t hf1 (by omega) (by rw [pe3]; omega) (by rw [pe2, pe3]; exact pe4) hd hS
                   (by rw [hjt]; exact hr2) (fun h => by simp at h) h
             · simp only [h22, Bool.false_eq_true, ↓reduceIte] at h ⊢
               have hi2 := usize_add_k a hsz iU 2 (by omega) (by omega)
@@ -680,7 +683,7 @@ theorem runC_sound (a : ByteArray) (hsz : a.size < 2 ^ 26) :
                     · simp only [hlt4, ↓reduceIte] at h
                       have hge : ¬ (i1.toNat < (iU + 4).toNat) := fun h' => hlt4 (USize.lt_iff_toNat_lt.2 h')
                       obtain ⟨pe2, -, pe4⟩ := pnU a hsz tape tw (by omega) htape (hdrW 0 0) 0
-                      exact ih (fu - 1) w1 b1 i1 (iU + 4) true _ (tw + 2) text fst d t hf1 (by rw [hi4]; omega) (by rw [pe3]; omega) (by rw [pe2, pe3]; exact pe4) hd
+                      exact ih (fu - 1) w1 b1 i1 (iU + 4) true _ (tw + 2) text fst stk sp d t hf1 (by rw [hi4]; omega) (by rw [pe3]; omega) (by rw [pe2, pe3]; exact pe4) hd hS
                         (by rw [hi4]; exact rel_mono a (stage1 a) hM hsz w1 b1 i1 _ _ hr1 (by omega) (by omega) (by rw [hi4] at hge; omega)) (fun h => by simp at h) h
                   · simp [hdl] at h
                 · simp [hc3] at h
@@ -702,7 +705,7 @@ theorem runC_sound (a : ByteArray) (hsz : a.size < 2 ^ 26) :
                       · simp only [hlt4, ↓reduceIte] at h
                         have hge : ¬ (i1.toNat < (iU + 4).toNat) := fun h' => hlt4 (USize.lt_iff_toNat_lt.2 h')
                         obtain ⟨pe2, -, pe4⟩ := pnU a hsz tape tw (by omega) htape (hdrW 2 0) 0
-                        exact ih (fu - 1) w1 b1 i1 (iU + 4) true _ (tw + 2) text fst d t hf1 (by rw [hi4]; omega) (by rw [pe3]; omega) (by rw [pe2, pe3]; exact pe4) hd
+                        exact ih (fu - 1) w1 b1 i1 (iU + 4) true _ (tw + 2) text fst stk sp d t hf1 (by rw [hi4]; omega) (by rw [pe3]; omega) (by rw [pe2, pe3]; exact pe4) hd hS
                           (by rw [hi4]; exact rel_mono a (stage1 a) hM hsz w1 b1 i1 _ _ hr1 (by omega) (by omega) (by rw [hi4] at hge; omega)) (fun h => by simp at h) h
                     · simp [hdl] at h
                   · simp [hc3] at h
@@ -724,7 +727,7 @@ theorem runC_sound (a : ByteArray) (hsz : a.size < 2 ^ 26) :
                         · simp only [hlt4, ↓reduceIte] at h
                           have hge : ¬ (i1.toNat < (iU + 5).toNat) := fun h' => hlt4 (USize.lt_iff_toNat_lt.2 h')
                           obtain ⟨pe2, -, pe4⟩ := pnU a hsz tape tw (by omega) htape (hdrW 1 0) 0
-                          exact ih (fu - 1) w1 b1 i1 (iU + 5) true _ (tw + 2) text fst d t hf1 (by rw [hi5]; omega) (by rw [pe3]; omega) (by rw [pe2, pe3]; exact pe4) hd
+                          exact ih (fu - 1) w1 b1 i1 (iU + 5) true _ (tw + 2) text fst stk sp d t hf1 (by rw [hi5]; omega) (by rw [pe3]; omega) (by rw [pe2, pe3]; exact pe4) hd hS
                             (by rw [hi5]; exact rel_mono a (stage1 a) hM hsz w1 b1 i1 _ _ hr1 (by omega) (by omega) (by rw [hi5] at hge; omega)) (fun h => by simp at h) h
                       · simp [hdl] at h
                     · simp [hc3] at h
@@ -749,7 +752,7 @@ theorem runC_sound (a : ByteArray) (hsz : a.size < 2 ^ 26) :
                             simp only [hnl, Bool.false_eq_true, ↓reduceIte]
                             generalize pushLex a iU.toNat (scanNumU a iU).toNat text = text' at h ⊢
                             obtain ⟨pe2, -, pe4⟩ := pnU a hsz tape tw (by omega) htape (hdrW 3 (text'.size - text.size)) (UInt64.ofNat text.size)
-                            exact ih (fu - 1) w1 b1 i1 (scanNumU a iU) true _ (tw + 2) text' fst d t hf1 hjb (by rw [pe3]; omega) (by rw [pe2, pe3]; exact pe4) hd
+                            exact ih (fu - 1) w1 b1 i1 (scanNumU a iU) true _ (tw + 2) text' fst stk sp d t hf1 hjb (by rw [pe3]; omega) (by rw [pe2, pe3]; exact pe4) hd hS
                               (rel_mono a (stage1 a) hM hsz w1 b1 i1 _ _ hr1 (by omega) (by omega) (by omega)) (fun h => by simp at h) h
                           · have hbf : bad = false := by simpa using hbd
                             have hl : lexOkU a iU (scanNumU a iU) = true := hlex.2 hbf
@@ -758,7 +761,7 @@ theorem runC_sound (a : ByteArray) (hsz : a.size < 2 ^ 26) :
                             unfold appendBytes at h
                             generalize a.copySlice iU.toNat text text.size (scanNumU a iU - iU).toNat false = text' at h ⊢
                             obtain ⟨pe2, -, pe4⟩ := pnU a hsz tape tw (by omega) htape (hdrW 3 (text'.size - text.size)) (UInt64.ofNat text.size)
-                            exact ih (fu - 1) w1 b1 i1 (scanNumU a iU) true _ (tw + 2) text' fst d t hf1 hjb (by rw [pe3]; omega) (by rw [pe2, pe3]; exact pe4) hd
+                            exact ih (fu - 1) w1 b1 i1 (scanNumU a iU) true _ (tw + 2) text' fst stk sp d t hf1 hjb (by rw [pe3]; omega) (by rw [pe2, pe3]; exact pe4) hd hS
                               (rel_mono a (stage1 a) hM hsz w1 b1 i1 _ _ hr1 (by omega) (by omega) (by omega)) (fun h => by simp at h) h
                       · simp [hdl] at h
       · simp only [hlt, ↓reduceDIte] at h
@@ -770,10 +773,20 @@ theorem runC_sound (a : ByteArray) (hsz : a.size < 2 ^ 26) :
       | nil =>
         simp only [] at h ⊢
         rw [e0]
+        have hsp0 : (sp == 0) = true := (usize_beq_zero sp).2 (by rw [hS.1]; rfl)
+        simp only [hsp0, ↓reduceIte] at h
         exact h
       | arr at_ n rest =>
         simp only [] at h ⊢
         rw [e0]
+        have hSl := hS.1
+        simp only [fsLen] at hSl
+        have hsp0 : ¬ (sp == 0) = true := fun h0 => by have := (usize_beq_zero sp).1 h0; omega
+        simp only [hsp0, Bool.false_eq_true, ↓reduceIte] at h
+        have hS0 : SInv stk sp (if 0 = 0 then FStack.arr at_ n rest else FStack.obj at_ n rest) := by simpa using hS
+        obtain ⟨r0, rn, hSp, hat⟩ := SInv_pop stk sp at_ n rest 0 (by decide) hS0 (by rw [fsLen_arr] at hd; omega)
+        rw [r0, rn, kind_word_eq at_ 0 (by decide)] at h
+        simp only [show (UInt64.ofNat 0 == 0) = true from rfl, ↓reduceIte] at h
         by_cases hcomma : byteIsU a i 0x2C = true
         · simp only [hcomma, ↓reduceIte] at h ⊢
           have hc' := hcomma
@@ -787,7 +800,10 @@ theorem runC_sound (a : ByteArray) (hsz : a.size < 2 ^ 26) :
             rw [skipU_eq (stage1 a) a hs31 _ (by rw [hi1]; omega), hi1, hp1]
           rw [e1']
           generalize curPosU a.usize w1 b1 = i1 at hk hp1 hp2 hp3 hr1 hr1s h
-          exact ih (fu - 1) w1 b1 i1 i1 false tape tw text _ d t hf1 hp3 (by omega) htape (by rw [fsLen_arr] at hd ⊢; omega) hr1s (fun _ => rfl) h
+          rw [ofNat_succ'] at h
+          have hS1 := SInv_inc stk sp at_ n rest 0 (by decide) hS0 (by rw [fsLen_arr] at hd; omega)
+          simp only [↓reduceIte] at hS1
+          exact ih (fu - 1) w1 b1 i1 i1 false tape tw text _ _ _ d t hf1 hp3 (by omega) htape (by rw [fsLen_arr] at hd ⊢; omega) hS1 hr1s (fun _ => rfl) h
         · simp only [hcomma, Bool.false_eq_true, ↓reduceIte] at h ⊢
           by_cases hclose : byteIsU a i 0x5D = true
           · simp only [hclose, ↓reduceIte] at h ⊢
@@ -799,13 +815,22 @@ theorem runC_sound (a : ByteArray) (hsz : a.size < 2 ^ 26) :
             have hi1 := add_one a i (by omega) hsz
             have hdl : (d + 1).toNat = d.toNat + 1 := usize_add_lit d 1 (by decide) (by have := usize_ge32; rw [fsLen_arr] at hd; omega)
             generalize curPosU a.usize w1 b1 = i1 at hk hp1 hp2 hp3 hr1 hr1s h
-            exact ih (fu - 1) w1 b1 i1 (i + 1) true _ tw text rest (d + 1) t hf1 (by omega) (by omega) (by rw [st64_size, st64_size]; exact htape)
-              (by rw [hdl]; rw [fsLen_arr] at hd; omega) (by rw [hi1]; exact hr1) (fun h => by simp at h) h
+            rw [unpack_at at_ 0 (by decide) hat, closeU_eq tape tw at_ hat, ofNat_succ'] at h
+            exact ih (fu - 1) w1 b1 i1 (i + 1) true _ tw text rest _ _ (d + 1) t hf1 (by omega) (by omega) (by rw [st64_size, st64_size]; exact htape)
+              (by rw [hdl]; rw [fsLen_arr] at hd; omega) hSp (by rw [hi1]; exact hr1) (fun h => by simp at h) h
           · simp only [hclose, Bool.false_eq_true, ↓reduceIte] at h
             simp at h
       | obj at_ n rest =>
         simp only [] at h ⊢
         rw [e0]
+        have hSl := hS.1
+        simp only [fsLen] at hSl
+        have hsp0 : ¬ (sp == 0) = true := fun h0 => by have := (usize_beq_zero sp).1 h0; omega
+        simp only [hsp0, Bool.false_eq_true, ↓reduceIte] at h
+        have hS0 : SInv stk sp (if 1 = 0 then FStack.arr at_ n rest else FStack.obj at_ n rest) := by simpa using hS
+        obtain ⟨r0, rn, hSp, hat⟩ := SInv_pop stk sp at_ n rest 1 (by decide) hS0 (by rw [fsLen_obj] at hd; omega)
+        rw [r0, rn, kind_word_eq at_ 1 (by decide)] at h
+        simp only [show (UInt64.ofNat 1 == 0) = false from rfl, Bool.false_eq_true, ↓reduceIte] at h
         by_cases hcomma : byteIsU a i 0x2C = true
         · simp only [hcomma, ↓reduceIte] at h ⊢
           have hc' := hcomma
@@ -856,8 +881,11 @@ theorem runC_sound (a : ByteArray) (hsz : a.size < 2 ^ 26) :
                 rw [e4]
                 generalize curPosU a.usize w4 b4 = i4 at hk4 hu1 hu2 hu3 hr4 hr4s h e4
                 obtain ⟨pf2, pf3, pf4⟩ := pnU a hsz tape tw (by omega) htape (hdrW 4 (text'.size - text.size)) (UInt64.ofNat text.size)
-                exact ih (fu - 1) w4 b4 i4 i4 false _ (tw + 2) text' _ d t hf1 hu3 (by rw [pf3]; omega)
-                  (by rw [pf2, pf3]; exact pf4) (by rw [fsLen_obj] at hd ⊢; omega) hr4s (fun _ => rfl) h
+                rw [ofNat_succ'] at h
+                have hS1 := SInv_inc stk sp at_ n rest 1 (by decide) hS0 (by rw [fsLen_obj] at hd; omega)
+                simp only [show (1 : Nat) ≠ 0 by decide, ↓reduceIte] at hS1
+                exact ih (fu - 1) w4 b4 i4 i4 false _ (tw + 2) text' _ _ _ d t hf1 hu3 (by rw [pf3]; omega)
+                  (by rw [pf2, pf3]; exact pf4) (by rw [fsLen_obj] at hd ⊢; omega) hS1 hr4s (fun _ => rfl) h
               · simp only [hc3, Bool.false_eq_true, ↓reduceIte] at h
                 simp at h
           · exfalso
@@ -876,8 +904,9 @@ theorem runC_sound (a : ByteArray) (hsz : a.size < 2 ^ 26) :
             have hi1 := add_one a i (by omega) hsz
             have hdl : (d + 1).toNat = d.toNat + 1 := usize_add_lit d 1 (by decide) (by have := usize_ge32; rw [fsLen_obj] at hd; omega)
             generalize curPosU a.usize w1 b1 = i1 at hk hp1 hp2 hp3 hr1 hr1s h
-            exact ih (fu - 1) w1 b1 i1 (i + 1) true _ tw text rest (d + 1) t hf1 (by omega) (by omega) (by rw [st64_size, st64_size]; exact htape)
-              (by rw [hdl]; rw [fsLen_obj] at hd; omega) (by rw [hi1]; exact hr1) (fun h => by simp at h) h
+            rw [unpack_at at_ 1 (by decide) hat, closeU_eq tape tw at_ hat, ofNat_succ'] at h
+            exact ih (fu - 1) w1 b1 i1 (i + 1) true _ tw text rest _ _ (d + 1) t hf1 (by omega) (by omega) (by rw [st64_size, st64_size]; exact htape)
+              (by rw [hdl]; rw [fsLen_obj] at hd; omega) hSp (by rw [hi1]; exact hr1) (fun h => by simp at h) h
           · simp only [hclose, Bool.false_eq_true, ↓reduceIte] at h
             simp at h
 
@@ -901,7 +930,9 @@ theorem parseTapeSimd_eq (a : ByteArray) : parseTapeSimd a = parseTapeFast a := 
     have hz : zeros4k.size = 4096 := (zeroBytes_spec 4096).1
     generalize hT : initTape (tapeHint (stage1 a)) = T0 at hU ⊢
     have ht0 : T0.size = 4096 := by rw [← hT]; exact initTape_size _
-    cases hr : runC (stage1 a) (a.usize + 2) a w0 b0 (curPosU a.usize w0 b0) false T0 0 (ByteArray.emptyWithCapacity a.size) FStack.nil maxDepth.toUSize with
+    generalize hT2 : initTape 8192 = S0 at hU ⊢
+    have hs0 : S0.size = 4096 := by rw [← hT2]; exact initTape_size _
+    cases hr : runC (stage1 a) (a.usize + 2) a w0 b0 (curPosU a.usize w0 b0) false T0 0 (ByteArray.emptyWithCapacity a.size) S0 0 maxDepth.toUSize with
     | none => rfl
     | some t =>
       have hrel : CRel a (stage1 a) w0 b0 (curPosU a.usize w0 b0) 0 := ⟨hc, hn, hw, rfl⟩
@@ -913,8 +944,8 @@ theorem parseTapeSimd_eq (a : ByteArray) : parseTapeSimd a = parseTapeFast a := 
       have hsk := skipI_le (stage1 a) a.size 0
       have hkk := sk0 a hsz' 0 (by rw [usize_zero_toNat]; omega)
       rw [usize_zero_toNat] at hkk
-      have hu := runC_sound a hsz' (a.size + 2) (a.usize + 2) w0 b0 _ (skipU (stage1 a) a.usize 0) false T0 0 (ByteArray.emptyWithCapacity a.size) FStack.nil maxDepth.toUSize t hfu
-        (by rw [hkk]; omega) (by rw [usize_zero_toNat]; omega) (by rw [usize_zero_toNat]; omega) (by rw [hmd]; unfold maxDepth; simp [fsLen]) hrel' (fun _ => e0) hr
+      have hu := runC_sound a hsz' (a.size + 2) (a.usize + 2) w0 b0 _ (skipU (stage1 a) a.usize 0) false T0 0 (ByteArray.emptyWithCapacity a.size) FStack.nil S0 0 maxDepth.toUSize t hfu
+        (by rw [hkk]; omega) (by rw [usize_zero_toNat]; omega) (by rw [usize_zero_toNat]; omega) (by rw [hmd]; unfold maxDepth; simp [fsLen]) (SInv_nil S0 (by omega)) hrel' (fun _ => e0) hr
       simp only [hu] at hU
       exact hU
   · simp [hsz]
