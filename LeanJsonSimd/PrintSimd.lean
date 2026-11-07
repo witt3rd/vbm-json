@@ -9,9 +9,9 @@ and everything proved of `printTape` (`printTape_encode`) holds of the export. -
 namespace LeanJson
 open VbmSimd
 
-/-- `ldw`, by one load. -/
+/-- `ldw`, by one load. The word is inside the tape (`i + 1 ≤ size / 8`, tested without a multiplication) and its byte offset is below 2^31, so it is exact on 32 bits. -/
 @[inline] def ldwS (a : ByteArray) (i : Nat) : UInt64 :=
-  if 8 * i + 8 ≤ a.size ∧ a.size / 65536 < 65536 then ld64 a (8 * i).toUSize else ldw a i
+  if i < 268435456 ∧ i + 1 ≤ a.size >>> 3 then ld64 a (8 * i).toUSize else ldw a i
 
 /-! ## The leaves: a text read a word at a time
 
@@ -85,7 +85,7 @@ def escLoopRS (x : ByteArray) (i e : Nat) (b : ByteArray) : ByteArray :=
   else b
 termination_by e - i
 
-/-- `pleaf`, with the word-at-a-time leaves. -/
+/-- `pleaf`, with the word-at-a-time leaves; a lexeme that passed `numLexS` holds no byte to escape (`numLex_allC`), so it is copied whole. -/
 def pleafS (x : ByteArray) (h aux : UInt64) (b : ByteArray) : ByteArray :=
   let len := (h >>> 8).toNat
   let k := h % 256
@@ -95,7 +95,7 @@ def pleafS (x : ByteArray) (h aux : UInt64) (b : ByteArray) : ByteArray :=
   else if k == 3 then
     if aux < 0x4000000000000000 then
       let off := aux.toNat
-      if off + len ≤ x.size && numLexS x off (off + len) then escLoopRS x off (off + len) b else ByteArray.empty
+      if off + len ≤ x.size && numLexS x off (off + len) then x.copySlice off b b.size len false else ByteArray.empty
     else ByteArray.empty
   else if k == 4 then
     if aux < 0x4000000000000000 then

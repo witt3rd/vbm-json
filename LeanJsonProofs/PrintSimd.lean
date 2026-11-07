@@ -66,11 +66,12 @@ theorem ors_eq (b0 b1 b2 b3 b4 b5 b6 b7 : UInt8) :
 
 theorem ldwS_eq (a : ByteArray) (i : Nat) : ldwS a i = ldw a i := by
   unfold ldwS
-  by_cases h : 8 * i + 8 ≤ a.size ∧ a.size / 65536 < 65536
-  · simp only [h, and_self, ↓reduceIte]
+  by_cases h : i < 268435456 ∧ i + 1 ≤ a.size >>> 3
+  · have h8 : 8 * i + 8 ≤ a.size := by have := h.2; rw [Nat.shiftRight_eq_div_pow] at this; omega
+    simp only [h, and_self, ↓reduceIte]
     rw [ld64_toUSize a (8 * i) (by omega)]
     unfold ldw ld64Model byteAt0
-    simp only [h.1, ↓reduceDIte]
+    simp only [h8, ↓reduceDIte]
     rw [ors_eq]
     have g : ∀ k (hk : k < a.size), a.data.getD k 0 = a[k] := by
       intro k hk; simp [hk]; rfl
@@ -300,11 +301,219 @@ theorem escLoopRS_eq (x : ByteArray) (e : Nat) : ∀ n i b, e - i = n → escLoo
       · rfl
     · simp only [h, ↓reduceDIte]
 
+/-! ### A number lexeme needs no escape -/
+
+/-- A byte a number lexeme may hold. -/
+def numC (b : UInt8) : Bool := isDig b || b == 0x2D || b == 0x2B || b == 0x2E || b == 0x65 || b == 0x45
+
+theorem numC_plain : ∀ b : UInt8, numC b = true → pPlain b = true := u8_forall _ (by decide)
+theorem isDig_numC : ∀ b : UInt8, isDig b = true → numC b = true := u8_forall _ (by decide)
+
+/-- Every byte of `x[a:b]` is inside `x` and may be in a number lexeme. -/
+def AllC (x : ByteArray) (a b : Nat) : Prop := ∀ q, a ≤ q → q < b → ∃ h : q < x.size, numC x[q] = true
+
+theorem AllC_trans (x : ByteArray) (a b c : Nat) (h1 : AllC x a b) (h2 : AllC x b c) : AllC x a c := by
+  intro q hq1 hq2
+  by_cases hq : q < b
+  · exact h1 q hq1 hq
+  · exact h2 q (by omega) hq2
+
+theorem AllC_nil (x : ByteArray) (a b : Nat) (h : b ≤ a) : AllC x a b := fun q h1 h2 => absurd h2 (by omega)
+
+theorem AllC_one (x : ByteArray) (a : Nat) (h : a < x.size) (hc : numC x[a] = true) : AllC x a (a + 1) := by
+  intro q h1 h2
+  have : q = a := by omega
+  subst this
+  exact ⟨h, hc⟩
+
+theorem runEnd_props (P : UInt8 → Bool) (x : ByteArray) (e : Nat) : ∀ n i, e - i = n →
+    i ≤ runEnd P x i e ∧ (i ≤ e → runEnd P x i e ≤ e) ∧ ∀ q, i ≤ q → q < runEnd P x i e → ∃ h : q < x.size, P x[q] = true := by
+  intro n
+  induction n using Nat.strongRecOn with
+  | _ n ih =>
+    intro i hn
+    rw [runEnd]
+    by_cases h : i < e ∧ i < x.size
+    · simp only [h, and_self, ↓reduceDIte]
+      by_cases hp : P x[i] = true
+      · simp only [hp, ↓reduceIte]
+        obtain ⟨a, b, c⟩ := ih (e - (i + 1)) (by omega) (i + 1) rfl
+        refine ⟨by omega, fun _ => b (by omega), fun q hq1 hq2 => ?_⟩
+        by_cases hq : q = i
+        · subst hq; exact ⟨h.2, hp⟩
+        · exact c q (by omega) hq2
+      · simp only [hp, Bool.false_eq_true, ↓reduceIte]
+        exact ⟨Nat.le_refl _, fun _ => by omega, fun q h1 h2 => absurd h2 (by omega)⟩
+    · simp only [h, ↓reduceDIte]
+      exact ⟨Nat.le_refl _, fun h' => by omega, fun q h1 h2 => absurd h2 (by omega)⟩
+
+theorem scanDig_props (x : ByteArray) (i e : Nat) : i ≤ scanDig x i e ∧ (i ≤ e → scanDig x i e ≤ e) ∧ AllC x i (scanDig x i e) := by
+  rw [scanDig_eq]
+  obtain ⟨a, b, c⟩ := runEnd_props isDig x e _ i rfl
+  exact ⟨a, b, fun q h1 h2 => by obtain ⟨h, hd⟩ := c q h1 h2; exact ⟨h, isDig_numC _ hd⟩⟩
+
+theorem byteIs_ex (x : ByteArray) (i : Nat) (c : UInt8) : byteIs x i c = true ↔ ∃ h : i < x.size, x[i] = c := by
+  unfold byteIs
+  by_cases hs : i < x.size
+  · simp [hs]
+  · simp [hs]
+
+theorem dig_iff (x : ByteArray) (j : Nat) :
+    (match byteAt x j with | some c => decide (0x30 ≤ c.toNat ∧ c.toNat ≤ 0x39) | none => false) = true ↔ ∃ h : j < x.size, 0x30 ≤ x[j].toNat ∧ x[j].toNat ≤ 0x39 := by
+  unfold byteAt
+  by_cases hs : j < x.size
+  · simp [hs]
+  · simp [hs]
+
+theorem numSign_props (x : ByteArray) (i e : Nat) : i ≤ numSign x i e ∧ numSign x i e ≤ i + 1 ∧ AllC x i (numSign x i e) := by
+  unfold numSign
+  by_cases h : i < e ∧ byteIs x i 0x2D = true
+  · have h' : (decide (i < e) && byteIs x i 0x2D) = true := by simp [h.1, h.2]
+    simp only [h', ↓reduceIte]
+    obtain ⟨hs, hx⟩ := (byteIs_ex x i _).1 h.2
+    refine ⟨by omega, by omega, AllC_one x i hs ?_⟩
+    rw [hx]; decide
+  · have h' : ¬ ((decide (i < e) && byteIs x i 0x2D) = true) := by
+      intro hh; apply h; simpa using hh
+    simp only [h', Bool.false_eq_true, ↓reduceIte]
+    exact ⟨Nat.le_refl _, by omega, AllC_nil x _ _ (Nat.le_refl _)⟩
+
+theorem numInt_props (x : ByteArray) (i e : Nat) (h0 : numInt x i e ≠ 0) : i < numInt x i e ∧ AllC x i (numInt x i e) := by
+  unfold numInt at h0 ⊢
+  by_cases hi : i < e
+  · simp only [hi, ↓reduceIte] at h0 ⊢
+    by_cases hb : i < x.size
+    · simp only [byteAt, hb, ↓reduceDIte] at h0 ⊢
+      by_cases hz : (x[i] == 0x30) = true
+      · simp only [hz, ↓reduceIte]
+        refine ⟨by omega, AllC_one x i hb ?_⟩
+        have : x[i] = 0x30 := by simpa using hz
+        rw [this]; decide
+      · simp only [hz, Bool.false_eq_true, ↓reduceIte] at h0 ⊢
+        by_cases hd : 0x31 ≤ x[i].toNat ∧ x[i].toNat ≤ 0x39
+        · simp only [hd, and_self, ↓reduceIte]
+          obtain ⟨a, _, c⟩ := scanDig_props x (i + 1) e
+          refine ⟨by omega, AllC_trans x i (i + 1) _ (AllC_one x i hb ?_) c⟩
+          have : isDig x[i] = true := by simp only [isDig, decide_eq_true_eq]; omega
+          exact isDig_numC _ this
+        · simp [hd] at h0
+    · simp [byteAt, hb] at h0
+  · simp [hi] at h0
+
+theorem numFrac_props (x : ByteArray) (i e : Nat) (h0 : numFrac x i e ≠ 0) : i ≤ numFrac x i e ∧ AllC x i (numFrac x i e) := by
+  by_cases hd : i < e ∧ byteIs x i 0x2E = true
+  · have hd' : (decide (i < e) && byteIs x i 0x2E) = true := by simp [hd.1, hd.2]
+    have e1 : numFrac x i e = if (decide (i + 1 < e) && match byteAt x (i + 1) with | some c => decide (0x30 ≤ c.toNat ∧ c.toNat ≤ 0x39) | none => false) = true then scanDig x (i + 2) e else 0 := by
+      unfold numFrac; simp only [hd', ↓reduceIte]; rfl
+    rw [e1] at h0 ⊢
+    obtain ⟨hs0, hx0⟩ := (byteIs_ex x i _).1 hd.2
+    by_cases hg : (decide (i + 1 < e) && match byteAt x (i + 1) with | some c => decide (0x30 ≤ c.toNat ∧ c.toNat ≤ 0x39) | none => false) = true
+    · simp only [hg, ↓reduceIte]
+      simp only [Bool.and_eq_true, decide_eq_true_eq] at hg
+      obtain ⟨hs1, hdg⟩ := (dig_iff x (i + 1)).1 hg.2
+      obtain ⟨a, _, c⟩ := scanDig_props x (i + 2) e
+      refine ⟨by omega, ?_⟩
+      have hd1 : AllC x i (i + 1) := AllC_one x i hs0 (by rw [hx0]; decide)
+      have hd2 : AllC x (i + 1) (i + 2) := AllC_one x (i + 1) hs1 (isDig_numC _ (by simp only [isDig, decide_eq_true_eq]; exact hdg))
+      exact AllC_trans x i (i + 1) _ hd1 (AllC_trans x (i + 1) (i + 2) _ hd2 c)
+    · simp only [hg, Bool.false_eq_true, ↓reduceIte] at h0
+      exact absurd rfl h0
+  · have hd' : ¬ ((decide (i < e) && byteIs x i 0x2E) = true) := by
+      intro hh; apply hd; simpa using hh
+    have e1 : numFrac x i e = i := by unfold numFrac; simp only [hd', Bool.false_eq_true, ↓reduceIte]
+    rw [e1]
+    exact ⟨Nat.le_refl _, AllC_nil x _ _ (Nat.le_refl _)⟩
+
+theorem numExp_props (x : ByteArray) (i e : Nat) (h0 : numExp x i e ≠ 0) : i ≤ numExp x i e ∧ AllC x i (numExp x i e) := by
+  by_cases hd : i < e ∧ (byteIs x i 0x65 || byteIs x i 0x45) = true
+  · have hd' : (decide (i < e) && (byteIs x i 0x65 || byteIs x i 0x45)) = true := by simp [hd.1, hd.2]
+    have e1 : numExp x i e = (let j := if (decide (i + 1 < e) && (byteIs x (i + 1) 0x2B || byteIs x (i + 1) 0x2D)) = true then i + 2 else i + 1
+        if (decide (j < e) && match byteAt x j with | some c => decide (0x30 ≤ c.toNat ∧ c.toNat ≤ 0x39) | none => false) = true then scanDig x (j + 1) e else 0) := by
+      unfold numExp; simp only [hd', ↓reduceIte]; rfl
+    rw [e1] at h0 ⊢
+    simp only [] at h0 ⊢
+    obtain ⟨hs0, hx0⟩ : ∃ h : i < x.size, (x[i] = 0x65 ∨ x[i] = 0x45) := by
+      have := hd.2
+      simp only [Bool.or_eq_true] at this
+      rcases this with h | h
+      · obtain ⟨a, b⟩ := (byteIs_ex x i _).1 h; exact ⟨a, Or.inl b⟩
+      · obtain ⟨a, b⟩ := (byteIs_ex x i _).1 h; exact ⟨a, Or.inr b⟩
+    have hdE : AllC x i (i + 1) := AllC_one x i hs0 (by rcases hx0 with h | h <;> rw [h] <;> decide)
+    -- the sign
+    have hj : ∃ j, (j = i + 1 ∨ (j = i + 2 ∧ i + 1 < e)) ∧ AllC x i j ∧
+        (if (decide (i + 1 < e) && (byteIs x (i + 1) 0x2B || byteIs x (i + 1) 0x2D)) = true then i + 2 else i + 1) = j := by
+      by_cases hg : (decide (i + 1 < e) && (byteIs x (i + 1) 0x2B || byteIs x (i + 1) 0x2D)) = true
+      · simp only [Bool.and_eq_true, decide_eq_true_eq, Bool.or_eq_true] at hg
+        refine ⟨i + 2, Or.inr ⟨rfl, hg.1⟩, ?_, by simp only [Bool.and_eq_true, decide_eq_true_eq, Bool.or_eq_true]; simp [hg]⟩
+        have hsg : AllC x (i + 1) (i + 2) := by
+          rcases hg.2 with h | h
+          · obtain ⟨a, b⟩ := (byteIs_ex x (i + 1) _).1 h; exact AllC_one x (i + 1) a (by rw [b]; decide)
+          · obtain ⟨a, b⟩ := (byteIs_ex x (i + 1) _).1 h; exact AllC_one x (i + 1) a (by rw [b]; decide)
+        exact AllC_trans x i (i + 1) _ hdE hsg
+      · exact ⟨i + 1, Or.inl rfl, hdE, by simp only [hg, Bool.false_eq_true, ↓reduceIte]⟩
+    obtain ⟨j, hjc, hAj, hjeq⟩ := hj
+    rw [hjeq] at h0 ⊢
+    by_cases hg : (decide (j < e) && match byteAt x j with | some c => decide (0x30 ≤ c.toNat ∧ c.toNat ≤ 0x39) | none => false) = true
+    · simp only [hg, ↓reduceIte]
+      simp only [Bool.and_eq_true, decide_eq_true_eq] at hg
+      obtain ⟨hs1, hdg⟩ := (dig_iff x j).1 hg.2
+      obtain ⟨a, _, c⟩ := scanDig_props x (j + 1) e
+      refine ⟨by omega, ?_⟩
+      have hd2 : AllC x j (j + 1) := AllC_one x j hs1 (isDig_numC _ (by simp only [isDig, decide_eq_true_eq]; exact hdg))
+      exact AllC_trans x i j _ hAj (AllC_trans x j (j + 1) _ hd2 c)
+    · simp only [hg, Bool.false_eq_true, ↓reduceIte] at h0
+      exact absurd rfl h0
+  · have hd' : ¬ ((decide (i < e) && (byteIs x i 0x65 || byteIs x i 0x45)) = true) := by
+      intro hh; apply hd; simpa using hh
+    have e1 : numExp x i e = i := by unfold numExp; simp only [hd', Bool.false_eq_true, ↓reduceIte]
+    rw [e1]
+    exact ⟨Nat.le_refl _, AllC_nil x _ _ (Nat.le_refl _)⟩
+
+/-- A lexeme that passes `numLex` has only bytes a number lexeme may hold. -/
+theorem numLex_allC (x : ByteArray) (i e : Nat) (h : numLex x i e = true) : i < e ∧ AllC x i e := by
+  unfold numLex at h
+  simp only [] at h
+  obtain ⟨s1, s2, s3⟩ := numSign_props x i e
+  by_cases h2 : numInt x (numSign x i e) e = 0
+  · simp [h2] at h
+  · by_cases h3 : numFrac x (numInt x (numSign x i e) e) e = 0
+    · simp [h2, h3] at h
+    · have hexp := h
+      simp only [h2, h3, beq_iff_eq, ↓reduceIte, Bool.and_eq_true, bne_iff_ne, ne_eq, beq_iff_eq] at hexp
+      obtain ⟨h4, h5⟩ := hexp
+      obtain ⟨i1, a1⟩ := numInt_props x _ e h2
+      obtain ⟨f1, a2⟩ := numFrac_props x _ e h3
+      obtain ⟨x1, a3⟩ := numExp_props x _ e h4
+      rw [h5] at a3 x1
+      exact ⟨by omega, AllC_trans x i _ _ s3 (AllC_trans x _ _ _ a1 (AllC_trans x _ _ _ a2 a3))⟩
+
+/-- A run of bytes of `x[i:e]` that all need no escape is copied whole by `escLoopR`. -/
+theorem escLoopR_plain (x : ByteArray) (i e : Nat) (b : ByteArray) (hi : i < e) (h : AllC x i e) :
+    escLoopR x i e b = x.copySlice i b b.size (e - i) false := by
+  have hall : ∀ m, m < e - i → ∃ hh : i + m < x.size, pPlain x[i + m] = true := fun m hm => by
+    obtain ⟨hh, hc⟩ := h (i + m) (by omega) (by omega)
+    exact ⟨hh, numC_plain _ hc⟩
+  have hend : plainEnd x i e = e := by
+    rw [plainEnd_eq, runEnd_skip pPlain x e (e - i) i hall (by omega), Nat.add_sub_cancel' (by omega), runEnd_stop pPlain x e e (by omega)]
+  rw [escLoopR]
+  simp only [hi, ↓reduceDIte, hend]
+  have : ¬ (i ≤ e ∧ e < e ∧ e < x.size) := by omega
+  simp only [this, ↓reduceDIte, ↓reduceIte]
+
 theorem pleafS_eq (x : ByteArray) (h aux : UInt64) (b : ByteArray) : pleafS x h aux b = pleaf x h aux b := by
   unfold pleafS pleaf
   have hE : ∀ i e b, escLoopRS x i e b = escLoopR x i e b := fun i e b => escLoopRS_eq x e _ i b rfl
   have hU : ∀ i e, utf8RangeS x i e = utf8Range x i e := fun i e => utf8RangeS_eq x e _ i rfl
-  simp only [numLexS_eq, hE, hU]
+  have hN : ∀ off len, (if (decide (off + len ≤ x.size) && numLex x off (off + len)) = true then x.copySlice off b b.size len false else ByteArray.empty) =
+      (if (decide (off + len ≤ x.size) && numLex x off (off + len)) = true then escLoopR x off (off + len) b else ByteArray.empty) := by
+    intro off len
+    by_cases hc : (decide (off + len ≤ x.size) && numLex x off (off + len)) = true
+    · simp only [hc, ↓reduceIte]
+      have hl : numLex x off (off + len) = true := by simpa using (by simpa using hc : _ ∧ numLex x off (off + len) = true).2
+      obtain ⟨hlt, hall⟩ := numLex_allC x off (off + len) hl
+      rw [escLoopR_plain x off (off + len) b hlt hall, Nat.add_sub_cancel_left]
+    · simp only [hc, Bool.false_eq_true, ↓reduceIte]
+  simp only [numLexS_eq, hE, hU, hN]
 
 theorem printTapeS_eq (w x : ByteArray) : printTapeS w x = printTape w x := by
   have : ldwS = ldw := funext fun a => funext fun i => ldwS_eq a i
