@@ -4,7 +4,7 @@ import LeanJsonProofs.Policy
 import LeanJsonProofs.Fast
 import LeanJsonProofs.FastLoop
 import LeanJsonProofs.Stage1
-import LeanJsonProofs.ParseU
+import LeanJsonProofs.ParseC
 /-! # The obligation ledger
 
 Every claim the library makes, keyed by a slug. A claim is `proved` only by naming theorems (double-backtick names are checked at

@@ -579,6 +579,130 @@ def runU (m : ByteArray) (f : USize) (a : ByteArray) (i : USize) (ret : Bool) (t
 termination_by f.toNat
 decreasing_by all_goals exact fuel_dec f ‹_›
 
+/-! ## `runC`: `runU` with the structural mask carried as a cursor
+
+`skipU` answers "the first structural position at or after `j`" from nothing but `j`: every call loads the mask word, bounds-tests it and shifts by a variable count. `runC` carries the mask as a cursor instead (`VbmSimd.Cursor`):
+the index `w` of a word and `b`, the bits of that word not yet consumed. The position of the next structural byte is `curPosU` (`64 * w + ctz b`, or the size when `b` is empty), consuming it is `clearLowest`, and an empty word is left
+for the next non-empty one (`nextWordU`). A token ends exactly at a structural position (the opening quote of a string, an operator) or runs from one (a number, a literal: the next structural position must lie at or after the end of the
+lexeme, else `runC` declines), so the next structural position after a token is the next bit of the cursor. `LeanJsonProofs/ParseC.lean`: `runC` answers `t` only when `runU` answers `t`. -/
+
+/-- The position the cursor stands at: `64 * w + ctz b`, or `size` when no bit is left. -/
+@[inline] def curPosU (size w : USize) (b : UInt64) : USize := if b == 0 then size else (w <<< 6) + (ctz b).toUSize
+
+/-- The first word after `w` that is not empty, or `n` (the number of words) when there is none (`w` below `n`; the guard `w < w + 1` is for a wrapped `USize`, which no input reaches). -/
+def nextWordU (m : ByteArray) (n w : USize) : USize :=
+  let w1 := w + 1
+  if _h : w < w1 ∧ w1 < n then (if ld64 m (w1 <<< 3) != 0 then w1 else nextWordU m n w1) else n
+termination_by n.toNat - w.toNat
+decreasing_by
+  obtain ⟨h1, h2⟩ : w < w + 1 ∧ w + 1 < n := ‹_›
+  have h3 : w.toNat < (w + 1).toNat := USize.lt_iff_toNat_lt.1 h1
+  have h4 : (w + 1).toNat < n.toNat := USize.lt_iff_toNat_lt.1 h2
+  show n.toNat - (w + 1).toNat < n.toNat - w.toNat
+  omega
+
+/-- The cursor after consuming the bit at `curPosU`, passed to `k` as the word index, the remaining bits and the position they stand at (CPS: nothing is built, `k` is inlined). -/
+@[inline] def advK {β : Type} (m : ByteArray) (size : USize) (w : USize) (b : UInt64) (k : USize → UInt64 → USize → β) : β :=
+  let b1 := clearLowest b
+  if b1 != 0 then k w b1 ((w <<< 6) + (ctz b1).toUSize)
+  else (let w1 := nextWordU m ((m.usize + 7) >>> 3) w; let b2 := ld64 m (w1 <<< 3); k w1 b2 (curPosU size w1 b2))
+
+/-- The cursor at the first structural position of the input. -/
+@[inline] def startK {β : Type} (m : ByteArray) (size : USize) (k : USize → UInt64 → USize → β) : β :=
+  let b0 := ld64 m 0
+  if b0 != 0 then k 0 b0 (curPosU size 0 b0)
+  else (let w1 := nextWordU m ((m.usize + 7) >>> 3) 0; let b2 := ld64 m (w1 <<< 3); k w1 b2 (curPosU size w1 b2))
+
+/-- `strU` with the position `r` of the first structural byte after the opening quote given (the cursor's). -/
+@[inline] def strC (a : ByteArray) (i r : USize) (text : ByteArray) : Option (ByteArray × USize) :=
+  if byteIsU a i 0x22 then
+    if i + 1 + plainOffU a (i + 1) 0 == r && byteIsU a r 0x22 then some (a.copySlice (i + 1).toNat text text.size (r - i - 1).toNat false, r + 1)
+    else match strBytesW a (i + 1).toNat text with
+      | some (t, j) => if r.toNat == j - 1 then some (t, j.toUSize) else none
+      | none => none
+  else none
+
+/-- `runU` with the cursor `(w, b)` in place of the position (`i` is the position it stands at: `curPosU`). -/
+def runC (m : ByteArray) (f : USize) (a : ByteArray) (w : USize) (b : UInt64) (i : USize) (ret : Bool) (tape : ByteArray) (tw : USize) (text : ByteArray) (fst : FStack) (d : USize) : Option ByteArray :=
+  if f == 0 then none else
+  let f1 := f - 1
+  let sz := a.usize
+  match ret, fst with
+  | false, fst =>
+    if h : i < a.usize then
+      let c := a.uget i (ugetOk a i h)
+      if c == 0x5B then
+        if d == 0 then none
+        else
+          advK m sz w b fun w1 b1 i1 =>
+          if byteIsU a i1 0x5D then advK m sz w1 b1 fun w2 b2 i2 => runC m f1 a w2 b2 i2 true (putNodeU tape tw (hdrW 5 0) 2) (tw + 2) text fst d
+          else runC m f1 a w1 b1 i1 false (putNodeU tape tw (hdrW 5 0) 0) (tw + 2) text (.arr tw.toNat 0 fst) (d - 1)
+      else if c == 0x7B then
+        if d == 0 then none
+        else
+          advK m sz w b fun w1 b1 i1 =>
+          if byteIsU a i1 0x7D then advK m sz w1 b1 fun w2 b2 i2 => runC m f1 a w2 b2 i2 true (putNodeU tape tw (hdrW 6 0) 2) (tw + 2) text fst d
+          else
+            let tape := putNodeU tape tw (hdrW 6 0) 0
+            let o := text.size
+            advK m sz w1 b1 fun w2 b2 i2 =>
+            match strC a i1 i2 text with
+            | some (text', _) =>
+              advK m sz w2 b2 fun w3 b3 i3 =>
+              if byteIsU a i3 0x3A then
+                advK m sz w3 b3 fun w4 b4 i4 => runC m f1 a w4 b4 i4 false (putNodeU tape (tw + 2) (hdrW 4 (text'.size - o)) (UInt64.ofNat o)) (tw + 4) text' (.obj tw.toNat 0 fst) (d - 1)
+              else none
+            | none => none
+      else if c == 0x22 then
+        let o := text.size
+        advK m sz w b fun w1 b1 i1 =>
+        match strC a i i1 text with
+        | some (text', _) => advK m sz w1 b1 fun w2 b2 i2 => runC m f1 a w2 b2 i2 true (putNodeU tape tw (hdrW 4 (text'.size - o)) (UInt64.ofNat o)) (tw + 2) text' fst d
+        | none => none
+      else if c == 0x6E then
+        if byteIsU a (i + 1) 0x75 && byteIsU a (i + 2) 0x6C && byteIsU a (i + 3) 0x6C then
+          if delimAtU a (i + 4) then advK m sz w b fun w1 b1 i1 => if i1 < i + 4 then none else runC m f1 a w1 b1 i1 true (putNodeU tape tw (hdrW 0 0) 0) (tw + 2) text fst d else none
+        else none
+      else if c == 0x74 then
+        if byteIsU a (i + 1) 0x72 && byteIsU a (i + 2) 0x75 && byteIsU a (i + 3) 0x65 then
+          if delimAtU a (i + 4) then advK m sz w b fun w1 b1 i1 => if i1 < i + 4 then none else runC m f1 a w1 b1 i1 true (putNodeU tape tw (hdrW 2 0) 0) (tw + 2) text fst d else none
+        else none
+      else if c == 0x66 then
+        if byteIsU a (i + 1) 0x61 && byteIsU a (i + 2) 0x6C && byteIsU a (i + 3) 0x73 && byteIsU a (i + 4) 0x65 then
+          if delimAtU a (i + 5) then advK m sz w b fun w1 b1 i1 => if i1 < i + 5 then none else runC m f1 a w1 b1 i1 true (putNodeU tape tw (hdrW 1 0) 0) (tw + 2) text fst d else none
+        else none
+      else
+        let j := scanNumU a i
+        if j == 0 then none
+        else if delimAtU a j then
+          let o := text.size
+          let text' := if lexOkU a i j then a.copySlice i.toNat text o (j - i).toNat false else pushLex a i.toNat j.toNat text
+          advK m sz w b fun w1 b1 i1 => if i1 < j then none else
+          runC m f1 a w1 b1 i1 true (putNodeU tape tw (hdrW 3 (text'.size - o)) (UInt64.ofNat o)) (tw + 2) text' fst d
+        else none
+    else none
+  | true, .nil => if a.usize ≤ i then some (finishW tape text tw.toNat) else none
+  | true, .arr at_ n rest =>
+    if byteIsU a i 0x2C then advK m sz w b fun w1 b1 i1 => runC m f1 a w1 b1 i1 false tape tw text (.arr at_ (n + 1) rest) d
+    else if byteIsU a i 0x5D then advK m sz w b fun w1 b1 i1 => runC m f1 a w1 b1 i1 true (st64 (st64 tape at_.toUSize (hdrW 5 (n + 1))) (at_ + 1).toUSize (UInt64.ofNat (tw.toNat - at_))) tw text rest (d + 1)
+    else none
+  | true, .obj at_ n rest =>
+    if byteIsU a i 0x2C then
+      let o := text.size
+      advK m sz w b fun w1 b1 i1 =>
+      advK m sz w1 b1 fun w2 b2 i2 =>
+      match strC a i1 i2 text with
+      | some (text', _) =>
+        advK m sz w2 b2 fun w3 b3 i3 =>
+        if byteIsU a i3 0x3A then
+          advK m sz w3 b3 fun w4 b4 i4 => runC m f1 a w4 b4 i4 false (putNodeU tape tw (hdrW 4 (text'.size - o)) (UInt64.ofNat o)) (tw + 2) text' (.obj at_ (n + 1) rest) d
+        else none
+      | none => none
+    else if byteIsU a i 0x7D then advK m sz w b fun w1 b1 i1 => runC m f1 a w1 b1 i1 true (st64 (st64 tape at_.toUSize (hdrW 6 (n + 1))) (at_ + 1).toUSize (UInt64.ofNat (tw.toNat - at_))) tw text rest (d + 1)
+    else none
+termination_by f.toNat
+decreasing_by all_goals exact fuel_dec f ‹_›
+
 /-- The number of set bits of a word (the usual shift, mask and add chain). -/
 @[inline] def popcnt64 (x : UInt64) : UInt64 :=
   let x := x - ((x >>> 1) &&& (0x5555555555555555 : UInt64))
@@ -601,6 +725,15 @@ def initTape (cap : Nat) : ByteArray :=
 
 /-- The index-driven parser: the structural mask of the input (stage 1, `stage1Fast`: the AVX2 classifier where the CPU has it), then `runU`; on any decline, or an input of `simdLimit` or more, the scalar fused parser. The bytes are `parseTapeFast`'s (`parseTapeSimd_eq`, `LeanJsonProofs/ParseU.lean`, through `runU_sound` and `runW_sound`). This is the export `vbm_json_parse_tape`: it lives in this module because the C edge initialises `LeanJsonSimd.ParseSimd` (`abi/vbm_json.c`), which initialises everything it imports. -/
 @[export vbm_json_parse_tape] def parseTapeSimd (a : ByteArray) : ByteArray :=
+  if a.size < simdLimit then
+    let m := stage1Fast a
+    match (startK m a.usize fun w0 b0 i0 => runC m (a.usize + 2) a w0 b0 i0 false (initTape (16 * popLoop m (m.size / 8) 0 0 + 4096)) 0 (ByteArray.emptyWithCapacity a.size) .nil maxDepth.toUSize) with
+    | some t => t
+    | none => parseTapeFast a
+  else parseTapeFast a
+
+/-- The same with `runU` (and the stateless skip), the step between `runI` and `runC` (`parseTapeU_eq`, `LeanJsonProofs/ParseU.lean`): not run by any export. -/
+def parseTapeU (a : ByteArray) : ByteArray :=
   if a.size < simdLimit then
     let m := stage1Fast a
     match runU m (a.usize + 2) a (skipU m a.usize 0) false (initTape (16 * popLoop m (m.size / 8) 0 0 + 4096)) 0 (ByteArray.emptyWithCapacity a.size) .nil maxDepth.toUSize with

@@ -1,6 +1,6 @@
 import LeanJsonProofs.ParseW
 import LeanJsonProofs.Stage1Avx
-/-! # Proof: `runU` (positions, counters and fuel as `USize`) answers only what `runW` answers (`runU_sound`), and the export equals the scalar parser (`parseTapeSimd_eq`)
+/-! # Proof: `runU` (positions, counters and fuel as `USize`) answers only what `runW` answers (`runU_sound`), and the parser built on it equals the scalar parser (`parseTapeU_eq`)
 
 `LeanJsonSimd/ParseSimd.lean`, `runU`. Every leaf of `runU` is shown equal, through `Nat.toNat`, to the leaf of `runW` it replaces (`byteIsU_eq`, `delimAtU_eq`, `skipU_eq`, `plainOffU_eq`, `scanDigitsU_eq`, `scanNumU_eq`, `lexOkU_eq`, `strU_eq`,
 `putNodeU_eq`); the induction is the one of `runW_sound`, over the same branches, with the bounds that keep every `USize` operation from wrapping (below `simdLimit`, on 32 bits as on 64) carried as hypotheses. -/
@@ -855,9 +855,9 @@ theorem initTape_size (cap : Nat) : (initTape cap).size = 4096 := by
   rw [h, ByteArray.size_append, e0, ByteArray.size_extract, hz]
   omega
 
-/-- The index-driven parser returns exactly what the scalar fused parser returns (and so, by `parseTapeFast_eq`, the tape of the `Value`). -/
-theorem parseTapeSimd_eq (a : ByteArray) : parseTapeSimd a = parseTapeFast a := by
-  unfold parseTapeSimd
+/-- The parser with `runU` returns exactly what the scalar fused parser returns (and so, by `parseTapeFast_eq`, the tape of the `Value`). -/
+theorem parseTapeU_eq (a : ByteArray) : parseTapeU a = parseTapeFast a := by
+  unfold parseTapeU
   by_cases hsz : a.size < simdLimit
   · simp only [hsz, ↓reduceIte]
     have hsz' : a.size < 2 ^ 26 := by unfold simdLimit at hsz; omega
