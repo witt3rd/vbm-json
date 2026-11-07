@@ -869,7 +869,7 @@ theorem parseTapeU_eq (a : ByteArray) : parseTapeU a = parseTapeFast a := by
     have hk := sk0 a hsz' 0 (by rw [usize_zero_toNat]; omega)
     rw [usize_zero_toNat] at hk
     have hz : zeros4k.size = 4096 := (zeroBytes_spec 4096).1
-    generalize hT : initTape (16 * popLoop (stage1 a) ((stage1 a).size / 8) 0 0 + 4096) = T0
+    generalize hT : initTape (tapeHint (stage1 a)) = T0
     have ht0 : T0.size = 4096 := by rw [← hT]; exact initTape_size _
     cases hr : runU (stage1 a) (a.usize + 2) a (skipU (stage1 a) a.usize 0) false T0 0 (ByteArray.emptyWithCapacity a.size) FStack.nil maxDepth.toUSize with
     | none => rfl

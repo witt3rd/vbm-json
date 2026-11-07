@@ -1,2 +1,2 @@
 # The pinned libraries: a library outside this one that it executes, held at one exact commit. The scorecard runner provisions them host-side from this file (the build runs offline). NAME REV SPEC_HASH ROOT SPEC_PATHS; write a line with: scripts/pinned-lib.py hash DIR PATHS
-vbm-simd e01a3fc2f10951a5101751dd212a4ac9e8d2a4de 183b44565e4ebbf9ada9b920a0a736871b563ff738446a6ef49ffa7cb8cd9ac9 VbmSimd VbmSimd/,VbmSimd.lean,include/,docs/SPEC.md,docs/trust-ledger.md,lakefile.lean,lake-manifest.json,lean-toolchain
+vbm-simd 23bb8c6d2db29f373d377177cc8d551c70d13ede c9474fac277e8d982be59d9a0b16f13a0107a2df6adf55fc95641577da1543f6 VbmSimd VbmSimd/,VbmSimd.lean,include/,docs/SPEC.md,docs/trust-ledger.md,lakefile.lean,lake-manifest.json,lean-toolchain

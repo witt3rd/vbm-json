@@ -4,3 +4,4 @@ VbmSimd.ctz | T14 | count trailing zeros (model ctzModel proved in vbm-simd)
 VbmSimd.inset64 | T14 | the AVX2 membership masks of 64 bytes, the stage-1 classifier (Lean model insetSpec, clause VS-12 in vbm-simd; reached only where hasAvx2)
 VbmSimd.hasAvx2 | T14 | the CPU test (cpuid, xgetbv); the proof of stage1Fast_eq holds for either answer
 VbmSimd.appendBytes | T14 | the short append: up to 32 bytes of the input appended to the text region by two overlapping moves, the runtime's copySlice otherwise (Lean model copySlice, clause VS-13 in vbm-simd, its ledger T13)
+VbmSimd.classify64 | T14 | the AVX2 class masks of 64 bytes (four masks of a block from nibble tables given by Lean), the stage-1 classifier (Lean model classifyModel, clause VS-14 in vbm-simd, its ledger T14; reached only where hasAvx2)

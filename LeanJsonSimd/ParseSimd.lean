@@ -774,10 +774,20 @@ decreasing_by all_goals exact fuel_dec f ‹_›
   let x := (x + (x >>> 4)) &&& (0x0f0f0f0f0f0f0f0f : UInt64)
   (x * (0x0101010101010101 : UInt64)) >>> 56
 
-/-- The number of set bits in the first `f` words of the mask array from word `k` (a capacity hint, `acc` the running sum, a tail call: the tape holds at most two words per node and every node starts at a set bit of the structural mask). -/
-def popLoop (m : ByteArray) : Nat → Nat → Nat → Nat
-  | 0, _, acc => acc
-  | f + 1, k, acc => popLoop m f (k + 1) (acc + (popcnt64 (ld64 m (8 * k).toUSize)).toNat)
+/-- The number of set bits in the words `k .. n - 1` of the mask array, added to `acc` (a capacity hint: no theorem depends on its value; the tape holds at most two words per node and every node starts at a set bit of the structural mask).
+A tail call over `USize` (the first version counted in `Nat`: about 70 instructions per word, 6% of a parse of small tokens). -/
+def popLoopU (m : ByteArray) (k n acc : USize) : USize :=
+  if _h : k < n then popLoopU m (k + 1) n (acc + (popcnt64 (ld64 m (k <<< 3))).toUSize) else acc
+termination_by n.toNat - k.toNat
+decreasing_by
+  have h : k < n := ‹_›
+  have h3 := USize.lt_iff_toNat_lt.1 h
+  have h7 := USize.toNat_lt_size n
+  rw [usize_add_lit k 1 (by decide) (by omega)]
+  omega
+
+/-- The capacity hint of the tape: 16 bytes per set bit of the mask, and 4096. -/
+def tapeHint (m : ByteArray) : Nat := 16 * (popLoopU m 0 (m.usize >>> 3) 0).toNat + 4096
 
 /-- The starting tape: 4096 zero bytes in an array with room for `cap` bytes, so that the tape grows in place (`growTape` appends within the capacity) instead of by the runtime's doubling copy. The capacity is a hint that no theorem depends on. -/
 def initTape (cap : Nat) : ByteArray :=
@@ -791,7 +801,7 @@ def initTape (cap : Nat) : ByteArray :=
 @[export vbm_json_parse_tape] def parseTapeSimd (a : ByteArray) : ByteArray :=
   if a.size < simdLimit then
     let m := stage1Fast a
-    match (startK m a.usize fun w0 b0 i0 => runC m (a.usize + 2) a w0 b0 i0 false (initTape (16 * popLoop m (m.size / 8) 0 0 + 4096)) 0 (ByteArray.emptyWithCapacity a.size) .nil maxDepth.toUSize) with
+    match (startK m a.usize fun w0 b0 i0 => runC m (a.usize + 2) a w0 b0 i0 false (initTape (tapeHint m)) 0 (ByteArray.emptyWithCapacity a.size) .nil maxDepth.toUSize) with
     | some t => t
     | none => parseTapeFast a
   else parseTapeFast a
@@ -800,7 +810,7 @@ def initTape (cap : Nat) : ByteArray :=
 def parseTapeU (a : ByteArray) : ByteArray :=
   if a.size < simdLimit then
     let m := stage1Fast a
-    match runU m (a.usize + 2) a (skipU m a.usize 0) false (initTape (16 * popLoop m (m.size / 8) 0 0 + 4096)) 0 (ByteArray.emptyWithCapacity a.size) .nil maxDepth.toUSize with
+    match runU m (a.usize + 2) a (skipU m a.usize 0) false (initTape (tapeHint m)) 0 (ByteArray.emptyWithCapacity a.size) .nil maxDepth.toUSize with
     | some t => t
     | none => parseTapeFast a
   else parseTapeFast a
