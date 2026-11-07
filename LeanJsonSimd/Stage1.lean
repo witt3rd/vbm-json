@@ -76,11 +76,11 @@ def stage1 (a : ByteArray) : ByteArray :=
   if a.size % 64 == 0 then out
   else st64 out (n - 1).toUSize (ld64 out (8 * (n - 1)).toUSize &&& (((1 : UInt64) <<< (a.size % 64).toUInt64) - 1))
 
-/-! ## The AVX2 classifier
+/-! ## The vector classifier (AVX2, NEON)
 
-Where the CPU has AVX2 the four class masks of a block (quotes, backslashes, operators, white space) come from `VbmSimd.inset64`, the trusted shim of vbm-simd (clause VS-12, trust ledger T12: a vector search whose Lean body, the model, is the
+Where the CPU has AVX2, or on aarch64 (NEON, vbm-simd T15), the four class masks of a block (quotes, backslashes, operators, white space) come from `VbmSimd.inset64`, the trusted shim of vbm-simd (clause VS-12, trust ledger T12: a vector search whose Lean body, the model, is the
 per-byte machine `insetSpec`), instead of from the word-at-a-time `blockOut`; everything after the masks (`maskOut`: the escape carry, the string state, the scalar starts) is the same proved Lean. `stage1Fast` takes the shim only where
-`hasAvx2 ()` and runs the portable `stage1` otherwise; `stage1Fast_eq` (`LeanJsonProofs/Stage1Avx.lean`) says `stage1Fast a = stage1 a` for either answer of the CPU test, by the model of the shim. -/
+`hasAvx2 () || hasNeon ()` and runs the portable `stage1` otherwise; `stage1Fast_eq` (`LeanJsonProofs/Stage1Avx.lean`) says `stage1Fast a = stage1 a` for either answer of the CPU test, by the model of the shim. -/
 
 /-- The nibble tables of the JSON byte classes (`VbmSimd.classByte`): the class bits of a byte are `lo[byte & 15] & hi[byte >> 4]`: bit 0 the quote, bit 1 the backslash, bits 2 to 4 the operators (`[ ] { }`, `:`, `,`),
 bits 5 and 6 the white space (tab, LF, CR; space). `classTbl_*` (`LeanJsonProofs/Stage1Avx.lean`) say that the four masks of `classMs` are exactly the four portable classes. -/
@@ -116,7 +116,7 @@ def stage1A (a : ByteArray) : ByteArray :=
   if a.size % 64 == 0 then out
   else st64 out (n - 1).toUSize (ld64 out (8 * (n - 1)).toUSize &&& (((1 : UInt64) <<< (a.size % 64).toUInt64) - 1))
 
-/-- The structural mask the parser uses: the AVX2 classifier on a CPU that has AVX2 (and the OS support: `hasAvx2`), the portable `stage1` otherwise. -/
-def stage1Fast (a : ByteArray) : ByteArray := if hasAvx2 () then stage1A a else stage1 a
+/-- The structural mask the parser uses: the vector classifier on a CPU that has AVX2 (and the OS support: `hasAvx2`) or on aarch64 (NEON: `hasNeon`, a compile-time fact), the portable `stage1` otherwise. -/
+def stage1Fast (a : ByteArray) : ByteArray := if hasAvx2 () || hasNeon () then stage1A a else stage1 a
 
 end LeanJson
