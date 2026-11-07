@@ -613,6 +613,57 @@ decreasing_by
   let q := i + plainOffU a i 0
   if h : q < a.usize then (if a.uget q (ugetOk a q h) < 0x80 then q else mbRunU a q) else q
 
+/-! ### The escapes on `USize`
+
+`decodeCharK` decodes an escape (`\n`, `\"`, `\uXXXX`, a surrogate pair) on boxed `Nat` values through `Option`-valued hex digits; `escK` is the same decoder on `USize` and `UInt32` in continuation-passing style: a hex digit is a word below 16
+(`hexU`, 16 for none), a hex quad is a word below `0x10000` (`hex4U`, `0x10000` for none), the one-character escapes a word (`simpleEscU`, 0 for none); a byte past the end reads as `0` (`getU`), which is no hex digit and no escape.
+`escK_eq` (`LeanJsonProofs/StrU.lean`) says it is `decodeCharK` at a backslash. -/
+
+/-- `hexVal`, as a word: the digit, or 16 (`hexU_eq`). -/
+@[inline] def hexU (b : UInt8) : UInt32 :=
+  if 0x30 ≤ b && b ≤ 0x39 then (b - 0x30).toUInt32
+  else if 0x41 ≤ b && b ≤ 0x46 then (b - 0x41).toUInt32 + 10
+  else if 0x61 ≤ b && b ≤ 0x66 then (b - 0x61).toUInt32 + 10
+  else 16
+
+/-- `hex4At`, as a word: the four digits at `i`, or `0x10000` (`hex4U_eq`). -/
+@[inline] def hex4U (a : ByteArray) (i : USize) : UInt32 :=
+  let h0 := hexU (getU a i)
+  let h1 := hexU (getU a (i + 1))
+  let h2 := hexU (getU a (i + 2))
+  let h3 := hexU (getU a (i + 3))
+  if h0 < 16 && h1 < 16 && h2 < 16 && h3 < 16 then h0 * 4096 + h1 * 256 + h2 * 16 + h3 else 0x10000
+
+/-- `simpleEsc`, as a word: the scalar, or 0 (`simpleEscU_eq`). -/
+@[inline] def simpleEscU (b : UInt8) : UInt32 :=
+  if b == 0x22 then 0x22 else if b == 0x5C then 0x5C else if b == 0x2F then 0x2F
+  else if b == 0x62 then 0x08 else if b == 0x66 then 0x0C else if b == 0x6E then 0x0A
+  else if b == 0x72 then 0x0D else if b == 0x74 then 0x09 else 0
+
+/-- `decodeCharK` at a backslash (the byte at `p`), on `USize`: the scalar and the position after the escape go to `k`, `d` when the escape is not well formed (`escK_eq`). -/
+@[inline] def escK {β : Type} (a : ByteArray) (p : USize) (k : UInt32 → USize → β) (d : β) : β :=
+  let b1 := getU a (p + 1)
+  if b1 == 0x75 then
+    let n := hex4U a (p + 2)
+    if n == 0x10000 then d
+    else if n < 0xD800 || 0xE000 ≤ n then k n (p + 6)
+    else if n < 0xDC00 then
+      if getU a (p + 6) == 0x5C && getU a (p + 7) == 0x75 then
+        let lo := hex4U a (p + 8)
+        if 0xDC00 ≤ lo && lo < 0xE000 then k ((0x10000 : UInt32) + ((n - 0xD800) * 1024) + (lo - 0xDC00)) (p + 12) else d
+      else d
+    else d
+  else
+    let e := simpleEscU b1
+    if e == 0 then d else k e (p + 2)
+
+/-- `pushChar`, on the scalar's word (`pushChar_eq`). -/
+def pushCharU (b : ByteArray) (v : UInt32) : ByteArray :=
+  if v ≤ 0x7f then b.push v.toUInt8
+  else if v ≤ 0x7ff then (b.push ((v >>> 6).toUInt8 &&& 0x1f ||| 0xc0)).push (v.toUInt8 &&& 0x3f ||| 0x80)
+  else if v ≤ 0xffff then ((b.push ((v >>> 12).toUInt8 &&& 0x0f ||| 0xe0)).push ((v >>> 6).toUInt8 &&& 0x3f ||| 0x80)).push (v.toUInt8 &&& 0x3f ||| 0x80)
+  else (((b.push ((v >>> 18).toUInt8 &&& 0x07 ||| 0xf0)).push ((v >>> 12).toUInt8 &&& 0x3f ||| 0x80)).push ((v >>> 6).toUInt8 &&& 0x3f ||| 0x80)).push (v.toUInt8 &&& 0x3f ||| 0x80)
+
 /-- The end of the run at `i` (`i ≤ a.size`; any other `i` is an empty run): `runEndU`, never before `i` (`runEndG_eq`). -/
 @[inline] def endG (i p0 : Nat) : Nat := if i ≤ p0 then p0 else i
 
@@ -633,6 +684,7 @@ def strBytesV (a : ByteArray) (i : Nat) (b : ByteArray) : Option (ByteArray × N
   if h : p < a.size then
     if a[p] == 0x22 then some (b, p + 1)
     else if plainAscii a[p] then strBytesV a (p + 1) (b.push a[p])
+    else if a[p] == 0x5C then escK a p.toUSize (fun n j => if p < j.toNat then strBytesV a j.toNat (pushCharU b n) else none) none
     else decodeCharK a p (fun n j => if p < j then strBytesV a j (pushChar b (Char.ofNat n)) else none) none
   else none
 termination_by a.size - i

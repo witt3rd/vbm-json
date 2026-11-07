@@ -345,6 +345,225 @@ theorem runEndG_eq (a : ByteArray) (hs : a.size < 2 ^ 26) (i : Nat) : runEndG a 
     simp [h1]
     omega
 
+
+/-! ## The escapes -/
+
+theorem hexU_spec : ∀ b : UInt8, hexVal b = (if hexU b < 16 then some (hexU b).toNat else none) := u8_forall _ (by decide)
+theorem hexU_le : ∀ b : UInt8, hexU b ≤ 16 := u8_forall _ (by decide)
+theorem simpleEscU_spec : ∀ b : UInt8, simpleEsc b = (if simpleEscU b == 0 then none else some (simpleEscU b).toNat) := u8_forall _ (by decide)
+
+theorem hexVal_zero : hexVal 0 = none := by decide
+
+theorem hex4At_getN (a : ByteArray) (i : Nat) : hex4At a i = hex4 (getN a i) (getN a (i + 1)) (getN a (i + 2)) (getN a (i + 3)) := by
+  unfold hex4At
+  rcases h0 : byteAt a i with _ | w
+  · rw [getN_none h0]; simp [hex4, hexVal_zero]
+  · rcases h1 : byteAt a (i + 1) with _ | x
+    · rw [getN_some h0, getN_none h1]; simp [hex4, hexVal_zero]
+    · rcases h2 : byteAt a (i + 2) with _ | y
+      · rw [getN_some h0, getN_some h1, getN_none h2]; simp [hex4, hexVal_zero]
+      · rcases h3 : byteAt a (i + 3) with _ | z
+        · rw [getN_some h0, getN_some h1, getN_some h2, getN_none h3]; simp [hex4, hexVal_zero]
+        · rw [getN_some h0, getN_some h1, getN_some h2, getN_some h3]
+
+theorem hex4U_eq (a : ByteArray) (hs : a.size < 2 ^ 26) (i : USize) (hi : i.toNat ≤ a.size + 12) :
+    (hex4U a i).toNat = (match hex4At a i.toNat with | some n => n | none => 0x10000) := by
+  have hs32 : a.size < 4294967296 := by omega
+  have p1 : (i + 1).toNat = i.toNat + 1 := usize_add_lit i 1 (by decide) (by have := usize_ge32; omega)
+  have p2 : (i + 2).toNat = i.toNat + 2 := usize_add_lit i 2 (by decide) (by have := usize_ge32; omega)
+  have p3 : (i + 3).toNat = i.toNat + 3 := usize_add_lit i 3 (by decide) (by have := usize_ge32; omega)
+  rw [hex4At_getN]
+  unfold hex4U
+  rw [getU_eq a hs32 i, getU_eq a hs32 (i + 1), getU_eq a hs32 (i + 2), getU_eq a hs32 (i + 3), p1, p2, p3]
+  unfold hex4
+  have e0 := hexU_spec (getN a i.toNat)
+  have e1 := hexU_spec (getN a (i.toNat + 1))
+  have e2 := hexU_spec (getN a (i.toNat + 2))
+  have e3 := hexU_spec (getN a (i.toNat + 3))
+  have l0 := hexU_le (getN a i.toNat)
+  have l1 := hexU_le (getN a (i.toNat + 1))
+  have l2 := hexU_le (getN a (i.toNat + 2))
+  have l3 := hexU_le (getN a (i.toNat + 3))
+  rw [e0, e1, e2, e3]
+  generalize hexU (getN a i.toNat) = h0 at *
+  generalize hexU (getN a (i.toNat + 1)) = h1 at *
+  generalize hexU (getN a (i.toNat + 2)) = h2 at *
+  generalize hexU (getN a (i.toNat + 3)) = h3 at *
+  have b0 := UInt32.le_iff_toNat_le.1 l0
+  have b1 := UInt32.le_iff_toNat_le.1 l1
+  have b2 := UInt32.le_iff_toNat_le.1 l2
+  have b3 := UInt32.le_iff_toNat_le.1 l3
+  have s16 : (16 : UInt32).toNat = 16 := rfl
+  rw [s16] at b0 b1 b2 b3
+  by_cases c0 : h0 < 16 <;> by_cases c1 : h1 < 16 <;> by_cases c2 : h2 < 16 <;> by_cases c3 : h3 < 16 <;>
+    simp [c0, c1, c2, c3, UInt32.toNat_add, UInt32.toNat_mul] <;>
+    (have d0 := UInt32.lt_iff_toNat_lt.1 c0; have d1 := UInt32.lt_iff_toNat_lt.1 c1; have d2 := UInt32.lt_iff_toNat_lt.1 c2; have d3 := UInt32.lt_iff_toNat_lt.1 c3; omega)
+
+theorem hexVal_lt (b : UInt8) (v : Nat) (h : hexVal b = some v) : v < 16 := by
+  rw [hexU_spec b] at h
+  by_cases hc : hexU b < 16
+  · simp only [hc, ↓reduceIte, Option.some.injEq] at h
+    have := UInt32.lt_iff_toNat_lt.1 hc
+    have s16 : (16 : UInt32).toNat = 16 := rfl
+    omega
+  · simp [hc] at h
+
+theorem hex4_lt (w x y z : UInt8) (n : Nat) (h : hex4 w x y z = some n) : n < 0x10000 := by
+  unfold hex4 at h
+  rcases e0 : hexVal w with _ | v0 <;> rcases e1 : hexVal x with _ | v1 <;> rcases e2 : hexVal y with _ | v2 <;> rcases e3 : hexVal z with _ | v3 <;> simp [e0, e1, e2, e3] at h
+  have := hexVal_lt w v0 e0
+  have := hexVal_lt x v1 e1
+  have := hexVal_lt y v2 e2
+  have := hexVal_lt z v3 e3
+  omega
+
+theorem hex4At_lt (a : ByteArray) (i n : Nat) (h : hex4At a i = some n) : n < 0x10000 := by
+  rw [hex4At_getN] at h
+  exact hex4_lt _ _ _ _ _ h
+
+theorem pushCharU_eq (b : ByteArray) (n : UInt32) (h : n.toNat < 0xD800 ∨ (0xE000 ≤ n.toNat ∧ n.toNat < 0x110000)) : pushCharU b n = pushChar b (Char.ofNat n.toNat) := by
+  have hv : (Char.ofNat n.toNat).val = n := by
+    apply UInt32.toNat_inj.mp
+    exact ofNat_val2 h
+  unfold pushChar pushCharU
+  rw [hv]
+
+theorem getN_beq_byteIs (a : ByteArray) (j : Nat) (c : UInt8) (hc : c ≠ 0) : (getN a j == c) = byteIs a j c := by
+  unfold byteIs getN
+  by_cases hj : j < a.size
+  · have : byteAt a j = some a[j] := by simp [byteAt, hj]
+    simp [this, hj]
+  · have : byteAt a j = none := by simp [byteAt, hj]
+    simp only [this, hj, ↓reduceDIte]
+    have : ((0 : UInt8) == c) = false := by
+      simp only [beq_eq_false_iff_ne, ne_eq]
+      exact fun h => hc h.symm
+    exact this
+
+theorem simpleEscU_lt : ∀ b : UInt8, (simpleEscU b).toNat < 0xD800 := u8_forall _ (by decide)
+
+theorem escK_eq {β : Type} (a : ByteArray) (hs : a.size < 2 ^ 26) (p : Nat) (hp : p < a.size) (hb : a[p] = 0x5C) (kU : UInt32 → USize → β) (kN : Nat → Nat → β) (d : β)
+    (hk : ∀ (n : UInt32) (j : USize), (n.toNat < 0xD800 ∨ (0xE000 ≤ n.toNat ∧ n.toNat < 0x110000)) → (j.toNat = p + 6 ∨ j.toNat = p + 12 ∨ j.toNat = p + 2) → kU n j = kN n.toNat j.toNat) :
+    escK a p.toUSize kU d = decodeCharK a p kN d := by
+  have hs32 : a.size < 4294967296 := by omega
+  have hpu : p.toUSize.toNat = p := usize_toNat_small _ (by omega)
+  have u : ∀ k : Nat, k < 16 → (p.toUSize + (OfNat.ofNat k : USize)).toNat = p + k := fun k hk =>
+    by rw [usize_add_lit _ k (by omega) (by rw [hpu]; have := usize_ge32; omega), hpu]
+  have q1 := u 1 (by decide)
+  have q2 := u 2 (by decide)
+  have q6 := u 6 (by decide)
+  have q7 := u 7 (by decide)
+  have q8 := u 8 (by decide)
+  have q12 := u 12 (by decide)
+  unfold decodeCharK
+  have h5c : byteIs a p 0x5C = true := by unfold byteIs; simp [hp, hb]
+  simp only [h5c, ↓reduceIte]
+  unfold escK
+  rw [getU_eq a hs32 (p.toUSize + 1), q1]
+  rcases hb1 : byteAt a (p + 1) with _ | b1
+  · rw [getN_none hb1]
+    simp [simpleEscU]
+  · rw [getN_some hb1]
+    by_cases hu : b1 == 0x75
+    · simp only [hu, ↓reduceIte]
+      unfold decodeUK
+      have hv := hex4U_eq a hs (p.toUSize + 2) (by rw [q2]; omega)
+      rw [q2] at hv
+      rcases hN : hex4At a (p + 2) with _ | nv
+      · rw [hN] at hv
+        simp only [] at hv
+        have : (hex4U a (p.toUSize + 2) == 0x10000) = true := by
+          have h1 : (hex4U a (p.toUSize + 2)).toNat = 0x10000 := hv
+          apply (beq_iff_eq).2
+          apply UInt32.toNat_inj.mp
+          rw [h1]; rfl
+        simp only [this, ↓reduceIte]
+      · rw [hN] at hv
+        simp only [] at hv
+        have hlt := hex4At_lt a _ _ hN
+        have hne : ¬ (hex4U a (p.toUSize + 2) == 0x10000) = true := by
+          intro h'
+          have := UInt32.toNat_inj.2 (beq_iff_eq.1 h')
+          rw [hv] at this
+          have e : (0x10000 : UInt32).toNat = 0x10000 := rfl
+          omega
+        simp only [hne, Bool.false_eq_true, ↓reduceIte]
+        generalize hnU : hex4U a (p.toUSize + 2) = nU at hv hne
+        have e1 : (0xD800 : UInt32).toNat = 0xD800 := rfl
+        have e2 : (0xE000 : UInt32).toNat = 0xE000 := rfl
+        have e3 : (0xDC00 : UInt32).toNat = 0xDC00 := rfl
+        by_cases hlow : nv < 0xD800 ∨ 0xE000 ≤ nv
+        · have hc : (nU < 0xD800 || 0xE000 ≤ nU) = true := by
+            simp only [Bool.or_eq_true, decide_eq_true_eq, UInt32.lt_iff_toNat_lt, UInt32.le_iff_toNat_le]
+            rw [e1, e2, hv]; exact hlow
+          simp only [hc, ↓reduceIte, hlow]
+          have := hk nU (p.toUSize + 6) (by rw [hv]; omega) (Or.inl (by rw [q6]))
+          rw [this, hv, q6]
+        · have hc : ¬ (nU < 0xD800 || 0xE000 ≤ nU) = true := by
+            simp only [Bool.or_eq_true, decide_eq_true_eq, UInt32.lt_iff_toNat_lt, UInt32.le_iff_toNat_le, not_or]
+            rw [e1, e2, hv]; omega
+          simp only [hc, Bool.false_eq_true, ↓reduceIte, hlow]
+          by_cases hhi : nv < 0xDC00
+          · have hh : nU < 0xDC00 := by
+              apply UInt32.lt_iff_toNat_lt.2; rw [e3, hv]; exact hhi
+            simp only [hh, hhi, ↓reduceIte]
+            rw [getU_eq a hs32 (p.toUSize + 6), getU_eq a hs32 (p.toUSize + 7), q6, q7]
+            have s1 : p + 2 + 4 = p + 6 := by omega
+            have s2 : p + 2 + 5 = p + 7 := by omega
+            have s3 : p + 2 + 6 = p + 8 := by omega
+            have s4 : p + 2 + 10 = p + 12 := by omega
+            rw [s1, s2, s3, s4, getN_beq_byteIs a (p + 6) 0x5C (by decide), getN_beq_byteIs a (p + 7) 0x75 (by decide)]
+            by_cases hpair : (byteIs a (p + 6) 0x5C && byteIs a (p + 7) 0x75) = true
+            · simp only [hpair, ↓reduceIte]
+              have hv2 := hex4U_eq a hs (p.toUSize + 8) (by rw [q8]; omega)
+              rw [q8] at hv2
+              rcases hL : hex4At a (p + 8) with _ | lv
+              · rw [hL] at hv2
+                simp only [] at hv2
+                have hc2 : ¬ (0xDC00 ≤ hex4U a (p.toUSize + 8) && hex4U a (p.toUSize + 8) < 0xE000) = true := by
+                  simp only [Bool.and_eq_true, decide_eq_true_eq, UInt32.lt_iff_toNat_lt, UInt32.le_iff_toNat_le, not_and]
+                  rw [e2, hv2]; intro _; omega
+                simp only [hc2, Bool.false_eq_true, ↓reduceIte]
+              · rw [hL] at hv2
+                simp only [] at hv2
+                have hlt2 := hex4At_lt a _ _ hL
+                generalize hlU : hex4U a (p.toUSize + 8) = lU at hv2
+                by_cases hrng : 0xDC00 ≤ lv ∧ lv < 0xE000
+                · have hc2 : (0xDC00 ≤ lU && lU < 0xE000) = true := by
+                    simp only [Bool.and_eq_true, decide_eq_true_eq, UInt32.lt_iff_toNat_lt, UInt32.le_iff_toNat_le]
+                    rw [e2, e3, hv2]; exact hrng
+                  simp only [hc2, hrng, and_self, ↓reduceIte]
+                  have hval : ((0x10000 : UInt32) + ((nU - 0xD800) * 1024) + (lU - 0xDC00)).toNat = 0x10000 + (nv - 0xD800) * 0x400 + (lv - 0xDC00) := by
+                    have h1 : (nU - 0xD800).toNat = nv - 0xD800 := by
+                      rw [UInt32.toNat_sub_of_le _ _ (UInt32.le_iff_toNat_le.2 (by rw [e1, hv]; omega)), hv, e1]
+                    have h2 : (lU - 0xDC00).toNat = lv - 0xDC00 := by
+                      rw [UInt32.toNat_sub_of_le _ _ (UInt32.le_iff_toNat_le.2 (by rw [e3, hv2]; omega)), hv2, e3]
+                    have k1 : (1024 : UInt32).toNat = 1024 := rfl
+                    have k2 : (0x10000 : UInt32).toNat = 0x10000 := rfl
+                    rw [UInt32.toNat_add, UInt32.toNat_add, UInt32.toNat_mul, h1, k1, h2, k2]
+                    have : (nv - 0xD800) * 1024 % 4294967296 = (nv - 0xD800) * 1024 := Nat.mod_eq_of_lt (by omega)
+                    omega
+                  have := hk ((0x10000 : UInt32) + ((nU - 0xD800) * 1024) + (lU - 0xDC00)) (p.toUSize + 12) (by rw [hval]; omega) (Or.inr (Or.inl (by rw [q12])))
+                  rw [this, hval, q12]
+                · have hc2 : ¬ (0xDC00 ≤ lU && lU < 0xE000) = true := by
+                    simp only [Bool.and_eq_true, decide_eq_true_eq, UInt32.lt_iff_toNat_lt, UInt32.le_iff_toNat_le, not_and]
+                    rw [e2, e3, hv2]; intro h1 h2; exact hrng ⟨h1, h2⟩
+                  simp only [hc2, hrng, Bool.false_eq_true, ↓reduceIte]
+            · simp only [hpair, Bool.false_eq_true, ↓reduceIte]
+          · have hh : ¬ nU < 0xDC00 := by
+              intro h'
+              have := UInt32.lt_iff_toNat_lt.1 h'
+              rw [e3, hv] at this; exact hhi this
+            simp only [hh, hhi, ↓reduceIte]
+    · have hu' : ¬ (b1 == 0x75) = true := hu
+      simp only [hu', Bool.false_eq_true, ↓reduceIte]
+      rw [simpleEscU_spec b1]
+      by_cases he : simpleEscU b1 == 0
+      · simp only [he, ↓reduceIte]
+      · simp only [he, Bool.false_eq_true, ↓reduceIte]
+        have := hk (simpleEscU b1) (p.toUSize + 2) (Or.inl (simpleEscU_lt b1)) (Or.inr (Or.inr (by rw [q2])))
+        rw [this, q2]
+
 theorem strBytesV_eq (a : ByteArray) (hs : a.size < 2 ^ 26) : ∀ d i b, a.size - i = d → strBytesV a i b = strBytesW a i b := by
   intro d
   induction d using Nat.strongRecOn with
@@ -362,12 +581,23 @@ theorem strBytesV_eq (a : ByteArray) (hs : a.size < 2 ^ 26) : ∀ d i b, a.size 
         · simp only [hpl, ↓reduceIte]
           exact ih (a.size - (p + 1)) (by omega) (p + 1) _ rfl
         · simp only [hpl, Bool.false_eq_true, ↓reduceIte]
-          congr 1
-          funext n j
-          by_cases hpj : p < j
-          · simp only [hpj, ↓reduceIte]
-            exact ih (a.size - j) (by omega) j _ rfl
-          · simp only [hpj, ↓reduceIte]
+          by_cases hbk : (a[p] == 0x5C) = true
+          · simp only [hbk, ↓reduceIte]
+            have hb : a[p] = 0x5C := by simpa using hbk
+            apply escK_eq a hs p hpa hb
+            intro n j hn hj
+            by_cases hpj : p < j.toNat
+            · simp only [hpj, ↓reduceIte]
+              rw [pushCharU_eq _ n hn]
+              exact ih (a.size - j.toNat) (by omega) j.toNat _ rfl
+            · simp only [hpj, ↓reduceIte]
+          · simp only [hbk, Bool.false_eq_true, ↓reduceIte]
+            congr 1
+            funext n j
+            by_cases hpj : p < j
+            · simp only [hpj, ↓reduceIte]
+              exact ih (a.size - j) (by omega) j _ rfl
+            · simp only [hpj, ↓reduceIte]
     · simp only [hpa, ↓reduceDIte]
 
 end LeanJsonProofs

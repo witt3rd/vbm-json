@@ -450,3 +450,20 @@ Same harness as slices 1 and 2 (instructions retired and user cycles per input b
 | small-objects | 2412355 | 56.44 | 53.10 | 19.24 | 18.25 |
 | string-heavy | 2915939 | 23.20 | 22.48 | 8.94 | 8.67 |
 | twitter | 631515 | 20.44 | 20.11 | 7.49 | 7.57 |
+
+## Round four, slice 4: the escapes on `USize` (`escK`, `hex4U`, `pushCharU`)
+
+After slice 2 the profile of string-heavy (ASCII text with `\uXXXX` escapes, the surrogate pair and `\n \" \\`) had `strBytesV` at 26% (the escape path: `decodeCharK` on boxed `Nat` through `Option`-valued hex digits, then `pushChar` of a `Char`). `escK` (`LeanJsonSimd/ParseSimd.lean`) is `decodeCharK` at a backslash on `USize` and `UInt32` in continuation-passing style: a hex digit is a word below 16 (`hexU`, 16 for none), a hex quad a word below `0x10000` (`hex4U`, `0x10000` for none), the one-character escapes a word (`simpleEscU`, 0 for none), a byte past the end reads as `0` (no hex digit, no escape); `pushCharU` is `pushChar` on the scalar's word. The proof (`LeanJsonProofs/StrU.lean`): `hexU_spec`, `simpleEscU_spec` (256 cases each), `hex4At_getN`, `hex4U_eq` (the word is the value or `0x10000`), `pushCharU_eq` (for a valid scalar `pushCharU b n` is `pushChar b (Char.ofNat n)`), `escK_eq` (`escK` at a backslash is `decodeCharK`, for any continuation that agrees on the valid scalars the escape can produce; the surrogate arithmetic is on `UInt32` with no wrap), and the step in `strBytesV_eq`. Two variants did not pay: the run before an escape copied by `appendBytes` instead of `copySlice` (+0.2 instructions per byte: the runs of this corpus are 20 to 100 bytes), and the hex quad's validity as an `|||` of the four digits (a test per digit is the same cost and has no bit-level proof).
+
+Same harness (instructions retired and user cycles per input byte, the minimum of 30 parses on CPU 8, **host x load 20 to 28, not quiet**; the output of the six corpora is byte-identical to the one before, checked by `cmp`):
+
+| corpus | bytes | instr/B before | instr/B after | cycles/B before | cycles/B after |
+|---|---|---|---|---|---|
+| canada | 2251051 | 26.52 | 26.52 | 12.28 | 12.28 |
+| citm_catalog | 1727204 | 12.65 | 12.65 | 3.51 | 2.79 |
+| scorecard corpus | 1033424 | 34.17 | 34.17 | 8.39 | 8.63 |
+| small-objects | 2412355 | 53.10 | 53.10 | 11.95 | 12.64 |
+| string-heavy | 2915939 | 22.48 | 20.68 | 5.75 | 5.44 |
+| twitter | 631515 | 20.11 | 20.04 | 5.21 | 5.18 |
+
+(The cycle columns of the rows whose code did not change differ by up to 25% between the two runs: the host was shared. Only string-heavy runs the changed code to a measurable degree.)
