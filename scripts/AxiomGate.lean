@@ -111,7 +111,7 @@ def ours (r : Name) : Bool := r == `LeanJson || r == `LeanJsonProofs || r == `Le
 
 def main (args : List String) : IO UInt32 := do
   initSearchPath (← findSysroot)
-  let env ← importModules #[{ module := `LeanJson }, { module := `LeanJsonProofs }, { module := `LeanJsonSimd }, { module := `VbmSimd }, { module := `VbmSimdProofs }] {}
+  let env ← importModules #[{ module := `LeanJson }, { module := `LeanJsonProofs }, { module := `LeanJsonSimd.ParseSimd }] {}
   -- the constants of our modules, read from those modules' own data (not by filtering every imported constant)
   let mut names : Array Name := #[]
   for h : i in [0:env.header.moduleNames.size] do
