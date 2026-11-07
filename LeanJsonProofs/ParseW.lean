@@ -368,28 +368,293 @@ theorem decodeCharK_eq {β : Type} (a : ByteArray) (i : Nat) (k : Nat → Nat �
     · simp only []
       by_cases h3 : 0x20 ≤ n ∧ n ≠ 0x22 ∧ n ≠ 0x5C <;> simp [h3]
 
-/-- `strBytes` with the plain runs copied at once is `strBytes`. -/
+/-! ## A multi-byte character is copied as its bytes
+
+`pushChar` of the scalar that `decodeUtf8A` reads is the bytes it read (`pushChar_2`, `pushChar_3`, `pushChar_4`: the UTF-8 encoding of the decoding of a well-formed sequence is the sequence), so a run of plain ASCII bytes and well-formed
+multi-byte characters is copied (`strBytes_run`) and `strBytes` never has to decode it. -/
+
+
+theorem ofNat_val2 {n : Nat} (h : n < 0xD800 ∨ (0xE000 ≤ n ∧ n < 0x110000)) : (Char.ofNat n).val.toNat = n := by
+  have : n.isValidChar := by unfold Nat.isValidChar; omega
+  simp [Char.ofNat, this, Char.ofNatAux]
+
+theorem or_mask (y t q : Nat) : ((y &&& (2 ^ t - 1)) ||| (2 ^ t * q)) = 2 ^ t * q + y % 2 ^ t := by
+  rw [Nat.and_two_pow_sub_one_eq_mod, Nat.or_comm]
+  exact (Nat.two_pow_add_eq_or_of_lt (Nat.mod_lt _ (Nat.two_pow_pos t)) q).symm
+
+theorem byte_enc (v s : UInt32) (hs : s.toNat < 32) (m k : UInt8) (t q : Nat) (hm : m.toNat = 2 ^ t - 1) (hk : k.toNat = 2 ^ t * q) :
+    (((v >>> s).toUInt8 &&& m) ||| k).toNat = 2 ^ t * q + (v.toNat / 2 ^ s.toNat % 256) % 2 ^ t := by
+  rw [UInt8.toNat_or, UInt8.toNat_and, hm, hk, or_mask, UInt32.toNat_toUInt8, UInt32.toNat_shiftRight, Nat.mod_eq_of_lt hs, Nat.shiftRight_eq_div_pow]
+
+theorem byte_enc0 (v : UInt32) (m k : UInt8) (t q : Nat) (hm : m.toNat = 2 ^ t - 1) (hk : k.toNat = 2 ^ t * q) :
+    ((v.toUInt8 &&& m) ||| k).toNat = 2 ^ t * q + (v.toNat % 256) % 2 ^ t := by
+  rw [UInt8.toNat_or, UInt8.toNat_and, hm, hk, or_mask, UInt32.toNat_toUInt8]
+
+theorem pushChar_2 (b : ByteArray) (x y : UInt8) (h1 : 0xC2 ≤ x.toNat) (h2 : x.toNat ≤ 0xDF) (h3 : 0x80 ≤ y.toNat) (h4 : y.toNat ≤ 0xBF) :
+    pushChar b (Char.ofNat ((x.toNat - 0xC0) * 64 + (y.toNat - 0x80))) = (b.push x).push y := by
+  have hv := ofNat_val2 (n := (x.toNat - 0xC0) * 64 + (y.toNat - 0x80)) (Or.inl (by omega))
+  unfold pushChar
+  generalize (Char.ofNat ((x.toNat - 0xC0) * 64 + (y.toNat - 0x80))).val = v at hv ⊢
+  have c1 : ¬ v ≤ 0x7f := by rw [UInt32.le_iff_toNat_le, hv]; show ¬ _ ≤ 127; omega
+  have c2 : v ≤ 0x7ff := by rw [UInt32.le_iff_toNat_le, hv]; show _ ≤ 2047; omega
+  simp only [c1, c2, ↓reduceIte]
+  have e1 : (v >>> 6).toUInt8 &&& 0x1f ||| 0xc0 = x := by
+    apply UInt8.toNat_inj.mp
+    rw [byte_enc v 6 (by decide) 0x1f 0xc0 5 6 (by decide) (by decide), hv]
+    show 2 ^ 5 * 6 + (_ / 2 ^ 6 % 256) % 2 ^ 5 = _
+    omega
+  have e2 : v.toUInt8 &&& 0x3f ||| 0x80 = y := by
+    apply UInt8.toNat_inj.mp
+    rw [byte_enc0 v 0x3f 0x80 6 2 (by decide) (by decide), hv]
+    omega
+  rw [e1, e2]
+
+
+theorem pushChar_3 (b : ByteArray) (x y z : UInt8) (h1 : 0xE0 ≤ x.toNat) (h2 : x.toNat ≤ 0xEF) (h3 : 0x80 ≤ y.toNat ∧ y.toNat ≤ 0xBF) (h4 : x.toNat = 0xE0 → 0xA0 ≤ y.toNat)
+    (h5 : x.toNat = 0xED → y.toNat ≤ 0x9F) (h6 : 0x80 ≤ z.toNat ∧ z.toNat ≤ 0xBF) :
+    pushChar b (Char.ofNat ((x.toNat - 0xE0) * 4096 + (y.toNat - 0x80) * 64 + (z.toNat - 0x80))) = ((b.push x).push y).push z := by
+  have hv := ofNat_val2 (n := (x.toNat - 0xE0) * 4096 + (y.toNat - 0x80) * 64 + (z.toNat - 0x80)) (by omega)
+  unfold pushChar
+  generalize (Char.ofNat ((x.toNat - 0xE0) * 4096 + (y.toNat - 0x80) * 64 + (z.toNat - 0x80))).val = v at hv ⊢
+  have c1 : ¬ v ≤ 0x7f := by rw [UInt32.le_iff_toNat_le, hv]; show ¬ _ ≤ 127; omega
+  have c2 : ¬ v ≤ 0x7ff := by rw [UInt32.le_iff_toNat_le, hv]; show ¬ _ ≤ 2047; omega
+  have c3 : v ≤ 0xffff := by rw [UInt32.le_iff_toNat_le, hv]; show _ ≤ 65535; omega
+  simp only [c1, c2, c3, ↓reduceIte]
+  have e1 : (v >>> 12).toUInt8 &&& 0x0f ||| 0xe0 = x := by
+    apply UInt8.toNat_inj.mp
+    rw [byte_enc v 12 (by decide) 0x0f 0xe0 4 14 (by decide) (by decide), hv]
+    show 2 ^ 4 * 14 + (_ / 2 ^ 12 % 256) % 2 ^ 4 = _
+    omega
+  have e2 : (v >>> 6).toUInt8 &&& 0x3f ||| 0x80 = y := by
+    apply UInt8.toNat_inj.mp
+    rw [byte_enc v 6 (by decide) 0x3f 0x80 6 2 (by decide) (by decide), hv]
+    show 2 ^ 6 * 2 + (_ / 2 ^ 6 % 256) % 2 ^ 6 = _
+    omega
+  have e3 : v.toUInt8 &&& 0x3f ||| 0x80 = z := by
+    apply UInt8.toNat_inj.mp
+    rw [byte_enc0 v 0x3f 0x80 6 2 (by decide) (by decide), hv]
+    omega
+  rw [e1, e2, e3]
+
+theorem pushChar_4 (b : ByteArray) (x y z w : UInt8) (h1 : 0xF0 ≤ x.toNat) (h2 : x.toNat ≤ 0xF4) (h3 : 0x80 ≤ y.toNat ∧ y.toNat ≤ 0xBF) (h4 : x.toNat = 0xF0 → 0x90 ≤ y.toNat)
+    (h5 : x.toNat = 0xF4 → y.toNat ≤ 0x8F) (h6 : 0x80 ≤ z.toNat ∧ z.toNat ≤ 0xBF) (h7 : 0x80 ≤ w.toNat ∧ w.toNat ≤ 0xBF) :
+    pushChar b (Char.ofNat ((x.toNat - 0xF0) * 262144 + (y.toNat - 0x80) * 4096 + (z.toNat - 0x80) * 64 + (w.toNat - 0x80))) = (((b.push x).push y).push z).push w := by
+  have hv := ofNat_val2 (n := (x.toNat - 0xF0) * 262144 + (y.toNat - 0x80) * 4096 + (z.toNat - 0x80) * 64 + (w.toNat - 0x80)) (by omega)
+  unfold pushChar
+  generalize (Char.ofNat ((x.toNat - 0xF0) * 262144 + (y.toNat - 0x80) * 4096 + (z.toNat - 0x80) * 64 + (w.toNat - 0x80))).val = v at hv ⊢
+  have c1 : ¬ v ≤ 0x7f := by rw [UInt32.le_iff_toNat_le, hv]; show ¬ _ ≤ 127; omega
+  have c2 : ¬ v ≤ 0x7ff := by rw [UInt32.le_iff_toNat_le, hv]; show ¬ _ ≤ 2047; omega
+  have c3 : ¬ v ≤ 0xffff := by rw [UInt32.le_iff_toNat_le, hv]; show ¬ _ ≤ 65535; omega
+  simp only [c1, c2, c3, ↓reduceIte]
+  have e1 : (v >>> 18).toUInt8 &&& 0x07 ||| 0xf0 = x := by
+    apply UInt8.toNat_inj.mp
+    rw [byte_enc v 18 (by decide) 0x07 0xf0 3 30 (by decide) (by decide), hv]
+    show 2 ^ 3 * 30 + (_ / 2 ^ 18 % 256) % 2 ^ 3 = _
+    omega
+  have e2 : (v >>> 12).toUInt8 &&& 0x3f ||| 0x80 = y := by
+    apply UInt8.toNat_inj.mp
+    rw [byte_enc v 12 (by decide) 0x3f 0x80 6 2 (by decide) (by decide), hv]
+    show 2 ^ 6 * 2 + (_ / 2 ^ 12 % 256) % 2 ^ 6 = _
+    omega
+  have e3 : (v >>> 6).toUInt8 &&& 0x3f ||| 0x80 = z := by
+    apply UInt8.toNat_inj.mp
+    rw [byte_enc v 6 (by decide) 0x3f 0x80 6 2 (by decide) (by decide), hv]
+    show 2 ^ 6 * 2 + (_ / 2 ^ 6 % 256) % 2 ^ 6 = _
+    omega
+  have e4 : v.toUInt8 &&& 0x3f ||| 0x80 = w := by
+    apply UInt8.toNat_inj.mp
+    rw [byte_enc0 v 0x3f 0x80 6 2 (by decide) (by decide), hv]
+    omega
+  rw [e1, e2, e3, e4]
+
+
+theorem byteAt_some {a : ByteArray} {i : Nat} {x : UInt8} (h : byteAt a i = some x) : ∃ hi : i < a.size, a[i] = x := by
+  by_cases hi : i < a.size
+  · simp only [byteAt, hi, ↓reduceDIte, Option.some.injEq] at h
+    exact ⟨hi, h⟩
+  · simp [byteAt, hi] at h
+
+theorem push_two (b a : ByteArray) (p : Nat) (hp : p + 2 ≤ a.size) : b ++ a.extract p (p + 2) = (b.push a[p]).push a[p + 1] := by
+  rw [← push_extract b a p (p + 2) (by omega) (by omega), ← push_extract (b.push a[p]) a (p + 1) (p + 2) (by omega) (by omega)]
+  rw [show p + 1 + 1 = p + 2 by omega, ByteArray.extract_same, ByteArray.append_empty]
+
+theorem push_three (b a : ByteArray) (p : Nat) (hp : p + 3 ≤ a.size) : b ++ a.extract p (p + 3) = ((b.push a[p]).push a[p + 1]).push a[p + 2] := by
+  rw [← push_extract b a p (p + 3) (by omega) (by omega), ← push_extract (b.push a[p]) a (p + 1) (p + 3) (by omega) (by omega),
+    ← push_extract ((b.push a[p]).push a[p + 1]) a (p + 1 + 1) (p + 3) (by omega) (by omega)]
+  rw [show p + 1 + 1 + 1 = p + 3 by omega, ByteArray.extract_same, ByteArray.append_empty]
+
+theorem push_four (b a : ByteArray) (p : Nat) (hp : p + 4 ≤ a.size) : b ++ a.extract p (p + 4) = (((b.push a[p]).push a[p + 1]).push a[p + 2]).push a[p + 3] := by
+  rw [← push_extract b a p (p + 4) (by omega) (by omega), ← push_extract (b.push a[p]) a (p + 1) (p + 4) (by omega) (by omega),
+    ← push_extract ((b.push a[p]).push a[p + 1]) a (p + 1 + 1) (p + 4) (by omega) (by omega),
+    ← push_extract (((b.push a[p]).push a[p + 1]).push a[p + 1 + 1]) a (p + 1 + 1 + 1) (p + 4) (by omega) (by omega)]
+  rw [show p + 1 + 1 + 1 + 1 = p + 4 by omega, ByteArray.extract_same, ByteArray.append_empty]
+
+/-- A multi-byte character that decodes: its scalar is at least `0x80`, it ends after its start, inside the input, and `pushChar` of the scalar appends the bytes read. -/
+theorem dec_multi (a : ByteArray) (p n e : Nat) (b : ByteArray) (h : decodeUtf8A a p = some (n, e)) (x : UInt8) (hxa : byteAt a p = some x) (hx : 0x80 ≤ x.toNat) :
+    0x80 ≤ n ∧ p < e ∧ e ≤ a.size ∧ pushChar b (Char.ofNat n) = b ++ a.extract p e := by
+  obtain ⟨hpa, ea⟩ := byteAt_some hxa
+  unfold decodeUtf8A at h
+  rw [hxa] at h
+  simp only [] at h
+  by_cases h1 : x.toNat < 0x80
+  · omega
+  · simp only [h1, ↓reduceIte] at h
+    by_cases h2 : 0xC2 ≤ x.toNat ∧ x.toNat ≤ 0xDF
+    · simp only [h2, and_self, ↓reduceIte] at h
+      rcases hb : byteAt a (p + 1) with _ | y
+      · rw [hb] at h; simp at h
+      · rw [hb] at h
+        simp only [] at h
+        by_cases h3 : Tail y
+        · simp only [h3, ↓reduceIte, Option.some.injEq, Prod.mk.injEq] at h
+          obtain ⟨hn, he⟩ := h
+          obtain ⟨hp1, eb⟩ := byteAt_some hb
+          have h3' := h3
+          unfold Tail at h3'
+          refine ⟨by omega, by omega, by omega, ?_⟩
+          rw [← hn, pushChar_2 b x y (by omega) (by omega) h3'.1 h3'.2, ← he, push_two b a p (by omega), ea, eb]
+        · simp [h3] at h
+    · simp only [h2, ↓reduceIte] at h
+      by_cases h3 : 0xE0 ≤ x.toNat ∧ x.toNat ≤ 0xEF
+      · simp only [h3, and_self, ↓reduceIte] at h
+        rcases hb : byteAt a (p + 1) with _ | y
+        · rw [hb] at h; simp at h
+        · rcases hc : byteAt a (p + 2) with _ | z
+          · rw [hb, hc] at h; simp at h
+          · rw [hb, hc] at h
+            simp only [] at h
+            by_cases h4 : Second3 x y ∧ Tail z
+            · simp only [h4, and_self, ↓reduceIte, Option.some.injEq, Prod.mk.injEq] at h
+              obtain ⟨hn, he⟩ := h
+              obtain ⟨hp1, eb⟩ := byteAt_some hb
+              obtain ⟨hp2, ec⟩ := byteAt_some hc
+              obtain ⟨⟨s1, s2, s3⟩, t2⟩ := h4
+              unfold Tail at s1 t2
+              refine ⟨by omega, by omega, by omega, ?_⟩
+              rw [← hn, pushChar_3 b x y z h3.1 h3.2 s1 s2 s3 t2, ← he, push_three b a p (by omega), ea, eb, ec]
+            · simp [h4] at h
+      · simp only [h3, ↓reduceIte] at h
+        by_cases h4 : 0xF0 ≤ x.toNat ∧ x.toNat ≤ 0xF4
+        · simp only [h4, and_self, ↓reduceIte] at h
+          rcases hb : byteAt a (p + 1) with _ | y
+          · rw [hb] at h; simp at h
+          · rcases hc : byteAt a (p + 2) with _ | z
+            · rw [hb, hc] at h; simp at h
+            · rcases hd : byteAt a (p + 3) with _ | w
+              · rw [hb, hc, hd] at h; simp at h
+              · rw [hb, hc, hd] at h
+                simp only [] at h
+                by_cases h5 : Second4 x y ∧ Tail z ∧ Tail w
+                · simp only [h5, and_self, ↓reduceIte, Option.some.injEq, Prod.mk.injEq] at h
+                  obtain ⟨hn, he⟩ := h
+                  obtain ⟨hp1, eb⟩ := byteAt_some hb
+                  obtain ⟨hp2, ec⟩ := byteAt_some hc
+                  obtain ⟨hp3, ed⟩ := byteAt_some hd
+                  obtain ⟨⟨s1, s2, s3⟩, t2, t3⟩ := h5
+                  unfold Tail at s1 t2 t3
+                  refine ⟨by omega, by omega, by omega, ?_⟩
+                  rw [← hn, pushChar_4 b x y z w h4.1 h4.2 s1 s2 s3 t2 t3, ← he, push_four b a p (by omega), ea, eb, ec, ed]
+                · simp [h5] at h
+        · simp only [h4, ↓reduceIte] at h
+          simp at h
+
+theorem mbRun_run (a : ByteArray) (hs : a.size < 2 ^ 31) : ∀ d q b, a.size - q = d →
+    strBytes a q b = strBytes a (mbRun a q) (b ++ a.extract q (mbRun a q)) := by
+  intro d
+  induction d using Nat.strongRecOn with
+  | _ d ih =>
+    intro q b hd
+    have triv : mbRun a q = q → strBytes a q b = strBytes a (mbRun a q) (b ++ a.extract q (mbRun a q)) := fun h => by
+      rw [h, ByteArray.extract_same, ByteArray.append_empty]
+    by_cases h : q < a.size
+    · by_cases h2 : a[q].toNat < 0x80
+      · exact triv (by rw [mbRun]; simp [h, h2])
+      · have hm : mbRun a q = (match decodeUtf8A a q with | some (n, e) => if q < e then mbRun a (e + plainOff a e 0) else q | none => q) := by
+          rw [mbRun]
+          simp only [h, h2, ↓reduceDIte, ↓reduceIte]
+          exact decodeUtf8K_eq _ _ _ _
+        have hxa : byteAt a q = some a[q] := by simp [byteAt, h]
+        cases hdec : decodeUtf8A a q with
+        | none => exact triv (by rw [hm, hdec])
+        | some ne =>
+          obtain ⟨n, e⟩ := ne
+          obtain ⟨hn80, hqe, hea, hpc⟩ := dec_multi a q n e b hdec a[q] hxa (by omega)
+          have hm' : mbRun a q = mbRun a (e + plainOff a e 0) := by rw [hm, hdec]; simp [hqe]
+          have s1 : strBytes a q b = strBytes a e (b ++ a.extract q e) := by
+            rw [strBytes]
+            simp only [h, ↓reduceDIte]
+            have hq22 : (a[q] == 0x22) = false := by
+              simp only [beq_eq_false_iff_ne, ne_eq]
+              intro heq
+              have : a[q].toNat = 0x22 := by rw [heq]; rfl
+              omega
+            have hpl : plainAscii a[q] = false := by unfold plainAscii; simp [h2]
+            have h5c : byteIs a q 0x5C = false := by
+              unfold byteIs
+              simp only [h, ↓reduceDIte, beq_eq_false_iff_ne, ne_eq]
+              intro heq
+              have : a[q].toNat = 0x5C := by rw [heq]; rfl
+              omega
+            have hdc : decodeCharA a q = some (n, e) := by
+              unfold decodeCharA
+              simp only [h5c, Bool.false_eq_true, ↓reduceIte]
+              rw [hdec]
+              have : 0x20 ≤ n ∧ n ≠ 0x22 ∧ n ≠ 0x5C := by omega
+              simp [this]
+            simp only [hq22, hpl, Bool.false_eq_true, ↓reduceIte, hdc, hqe, hpc]
+          have hrun := plainOff_run a hs _ e rfl
+          have s2 : strBytes a e (b ++ a.extract q e) = strBytes a (e + plainOff a e 0) (b ++ a.extract q e ++ a.extract e (e + plainOff a e 0)) :=
+            strBytes_plain a _ e _ _ rfl (by omega) hrun
+          have s3 := ih (a.size - (e + plainOff a e 0)) (by omega) (e + plainOff a e 0) (b ++ a.extract q e ++ a.extract e (e + plainOff a e 0)) rfl
+          have hge := mbRun_ge a _ (e + plainOff a e 0) rfl
+          rw [s1, s2, s3, hm']
+          generalize mbRun a (e + plainOff a e 0) = m at hge ⊢
+          congr 1
+          rw [ByteArray.extract_eq_extract_append_extract (i := q) (k := m) e (by omega) (by omega),
+            ByteArray.extract_eq_extract_append_extract (i := e) (k := m) (e + plainOff a e 0) (by omega) hge]
+          simp only [ByteArray.append_assoc]
+    · exact triv (by rw [mbRun]; simp [h])
+
+/-- The run of plain ASCII bytes and well-formed multi-byte characters at `i` is copied: `strBytes` over `a[i, runEnd a i)` appends it. -/
+theorem strBytes_run (a : ByteArray) (hs : a.size < 2 ^ 31) (i : Nat) (b : ByteArray) :
+    strBytes a i b = strBytes a (runEnd a i) (b ++ a.extract i (runEnd a i)) := by
+  have hrun := plainOff_run a hs _ i rfl
+  have hpl : strBytes a i b = strBytes a (i + plainOff a i 0) (b ++ a.extract i (i + plainOff a i 0)) :=
+    strBytes_plain a _ i _ b rfl (by omega) hrun
+  unfold runEnd
+  by_cases h : i + plainOff a i 0 < a.size
+  · simp only [h, ↓reduceDIte]
+    by_cases h2 : a[i + plainOff a i 0].toNat < 0x80
+    · simp only [h2, ↓reduceIte]; exact hpl
+    · simp only [h2, ↓reduceIte]
+      rw [hpl, mbRun_run a hs _ (i + plainOff a i 0) _ rfl]
+      have hge := mbRun_ge a _ (i + plainOff a i 0) rfl
+      generalize mbRun a (i + plainOff a i 0) = m at hge ⊢
+      congr 1
+      rw [ByteArray.extract_eq_extract_append_extract (i := i) (k := m) (i + plainOff a i 0) (by omega) hge, ByteArray.append_assoc]
+  · simp only [h, ↓reduceDIte]; exact hpl
+
+/-- `strBytes` with the runs copied at once is `strBytes`. -/
 theorem strBytesW_eq (a : ByteArray) (hs : a.size < 2 ^ 31) : ∀ d i b, a.size - i = d → strBytesW a i b = strBytes a i b := by
   intro d
   induction d using Nat.strongRecOn with
   | _ d ih =>
     intro i b hd
-    have hrun := plainOff_run a hs _ i rfl
-    have hpl : strBytes a i b = strBytes a (i + plainOff a i 0) (b ++ a.extract i (i + plainOff a i 0)) :=
-      strBytes_plain a _ i _ b rfl (by omega) hrun
-    have hcp0 : a.copySlice i b b.size (i + plainOff a i 0 - i) false = b ++ a.extract i (i + plainOff a i 0) := by
-      rw [copy_append, show i + (i + plainOff a i 0 - i) = i + plainOff a i 0 by omega]
-    have hcp : (if i + plainOff a i 0 == i then b else a.copySlice i b b.size (i + plainOff a i 0 - i) false) = b ++ a.extract i (i + plainOff a i 0) := by
-      by_cases hz : (i + plainOff a i 0 == i) = true
+    have hip := runEnd_ge a i
+    have hpl : strBytes a i b = strBytes a (runEnd a i) (b ++ a.extract i (runEnd a i)) := strBytes_run a hs i b
+    have hcp0 : a.copySlice i b b.size (runEnd a i - i) false = b ++ a.extract i (runEnd a i) := by
+      rw [copy_append, show i + (runEnd a i - i) = runEnd a i by omega]
+    have hcp : (if runEnd a i == i then b else a.copySlice i b b.size (runEnd a i - i) false) = b ++ a.extract i (runEnd a i) := by
+      by_cases hz : (runEnd a i == i) = true
       · simp only [hz, ↓reduceIte]
-        have : plainOff a i 0 = 0 := by simpa using hz
-        rw [this, Nat.add_zero, ByteArray.extract_same, ByteArray.append_empty]
+        have : runEnd a i = i := by simpa using hz
+        rw [this, ByteArray.extract_same, ByteArray.append_empty]
       · simp only [hz, Bool.false_eq_true, ↓reduceIte]; exact hcp0
     rw [strBytesW, hpl]
     simp only [hcp]
-    generalize b ++ a.extract i (i + plainOff a i 0) = b'
-    generalize hp : i + plainOff a i 0 = p
-    have hip : i ≤ p := by omega
+    generalize b ++ a.extract i (runEnd a i) = b'
+    generalize hp : runEnd a i = p
+    rw [hp] at hip
     by_cases hpa : p < a.size
     · simp only [hpa, ↓reduceDIte]
       rw [strBytes]

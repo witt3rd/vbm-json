@@ -271,3 +271,20 @@ Through the C ABI (`docs/perf/prof.c`, `leanc -O2`, static library, the two bina
 | twitter | 631515 | 420.5 | 457.6 | 1.09 |
 
 A first version that recomputed the position from `(w, b)` at the top of every loop iteration (`curPosU`: a test, a shift, `ctz`, an add) measured slower than main on canada (0.93) and scorecard (0.97) and faster on citm_catalog (1.10): the position is now computed once, by `advK`, and passed on as a loop argument. Every row is above main. The closure gate: spec 46966 | boundary 49 | unverified 0 | specified share 100.00%.
+
+## Round three, slice 2: multi-byte UTF-8 copied as bytes (`mbRun`)
+
+The slow path of a string (`strBytesW`: a string with an escape or a non-ASCII byte) decoded every multi-byte character and wrote it back byte by byte (`decodeCharK`, then `pushChar`, one runtime call per byte). `mbRun` (`LeanJsonSimd/ParseSimd.lean`) continues a run of plain ASCII bytes over well-formed multi-byte characters, a validity check by `decodeUtf8K` (whose scalar is not used), so that `strBytesW` copies the whole mixed run with one `copySlice`; `runEnd` is the run's end (the word-parallel plain run, then `mbRun` only when the byte that stopped it is not ASCII). The proof (`LeanJsonProofs/ParseW.lean`): `pushChar_2`, `pushChar_3`, `pushChar_4` (the UTF-8 encoding of the decoding of a well-formed sequence is the sequence: the byte arithmetic by `Nat.two_pow_add_eq_or_of_lt`, no `decide` over bytes, the scalar is a valid `Char` by `Second3`/`Second4`), `dec_multi` (what `decodeUtf8A` reads is copied by `pushChar` of its scalar), `mbRun_run` and `strBytes_run` (`strBytes` over the run appends it), then `strBytesW_eq` as before. The first version called `mbRun` for every run and measured 7% slower on string-heavy, whose non-ASCII is all `\uXXXX` escapes (the extra non-inlined call and boxed `Nat` tests per escape); now the call is made only where the stopping byte is not ASCII (`runEnd`).
+
+Through the C ABI as before (A = main at `ca2edaa`, B = this slice; best of 3 rounds of the median of 5 windows of 0.4 s, pinned to CPU 2 of host x; **load 3.8 before and 3.5 after: not quiet**):
+
+| corpus | bytes | MB/s A | MB/s B | B / A |
+|---|---|---|---|---|
+| canada | 2251051 | 473.4 | 493.7 | 1.04 |
+| citm_catalog | 1727204 | 1039.5 | 1061.1 | 1.02 |
+| scorecard corpus | 1033424 | 389.5 | 405.5 | 1.04 |
+| small-objects | 2412355 | 225.0 | 225.2 | 1.00 |
+| string-heavy | 2915939 | 593.1 | 592.3 | 1.00 |
+| twitter | 631515 | 410.4 | 489.7 | 1.19 |
+
+Only twitter (real text: Japanese, 3-byte characters) runs the changed path (the other rows' differences are the noise of the machine). Repeated at a load of 6 to 22 (another tenant busy on the host; absolute numbers halved, ratios are the information): twitter 1.34 and 1.37, every other row between 0.96 and 1.08.

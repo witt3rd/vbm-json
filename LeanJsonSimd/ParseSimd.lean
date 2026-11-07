@@ -239,9 +239,64 @@ termination_by a.size - i
     | some b => if b == 0x75 then decodeUK a (i + 2) k d else match simpleEsc b with | some n => k n (i + 2) | none => d
   else decodeUtf8K a i (fun n j => if 0x20 ≤ n ∧ n ≠ 0x22 ∧ n ≠ 0x5C then k n j else d) d
 
-/-- `strBytes`, with the plain run at each position copied by one `copySlice` (`strBytesW_eq`). -/
+/-- From a position `q` where a run of plain ASCII bytes (by words, `plainOff`) stopped: the end of the run continued over well-formed multi-byte characters (a validity check by `decodeUtf8K`, whose scalar is not used) and the plain bytes
+after them. The bytes of the run are what `strBytes` writes for it (`strBytes_run`). -/
+def mbRun (a : ByteArray) (q : Nat) : Nat :=
+  if h : q < a.size then
+    if a[q].toNat < 0x80 then q
+    else decodeUtf8K a q (fun _ e => if q < e then mbRun a (e + plainOff a e 0) else q) q
+  else q
+termination_by a.size - q
+decreasing_by
+  all_goals simp_wf
+  all_goals omega
+
+/-- Whatever the continuation and the default are, a property of both is a property of `decodeUtf8K`'s answer. -/
+theorem decodeUtf8K_mono {β : Type} (a : ByteArray) (i : Nat) (k : Nat → Nat → β) (d : β) (P : β → Prop) (hk : ∀ n e, P (k n e)) (hd : P d) :
+    P (decodeUtf8K a i k d) := by
+  unfold decodeUtf8K
+  repeat' split
+  all_goals first | exact hk _ _ | exact hd
+
+theorem mbRun_ge (a : ByteArray) : ∀ d q, a.size - q = d → q ≤ mbRun a q := by
+  intro d
+  induction d using Nat.strongRecOn with
+  | _ d ih =>
+    intro q hd
+    rw [mbRun]
+    by_cases h : q < a.size
+    · simp only [h, ↓reduceDIte]
+      by_cases h2 : a[q].toNat < 0x80
+      · simp only [h2, ↓reduceIte]; omega
+      · simp only [h2, ↓reduceIte]
+        apply decodeUtf8K_mono a _ _ _ (fun r => q ≤ r) _ (by omega)
+        intro n e
+        by_cases h3 : q < e
+        · simp only [h3, ↓reduceIte]
+          have := ih (a.size - (e + plainOff a e 0)) (by omega) (e + plainOff a e 0) rfl
+          omega
+        · simp only [h3, ↓reduceIte]; omega
+    · simp only [h, ↓reduceDIte]; omega
+
+/-- The end of the run at `i` of plain ASCII bytes and well-formed multi-byte characters: the plain bytes by words, then `mbRun` only where the byte that stopped them is not ASCII. -/
+@[inline] def runEnd (a : ByteArray) (i : Nat) : Nat :=
+  let q := i + plainOff a i 0
+  if h : q < a.size then (if a[q].toNat < 0x80 then q else mbRun a q) else q
+
+theorem runEnd_ge (a : ByteArray) (i : Nat) : i ≤ runEnd a i := by
+  unfold runEnd
+  by_cases h : i + plainOff a i 0 < a.size
+  · simp only [h, ↓reduceDIte]
+    by_cases h2 : a[i + plainOff a i 0].toNat < 0x80
+    · simp only [h2, ↓reduceIte]; omega
+    · simp only [h2, ↓reduceIte]
+      have := mbRun_ge a _ (i + plainOff a i 0) rfl
+      omega
+  · simp only [h, ↓reduceDIte]; omega
+
+/-- `strBytes`, with the run (plain ASCII bytes and well-formed multi-byte characters) at each position copied by one `copySlice` (`strBytesW_eq`). -/
 def strBytesW (a : ByteArray) (i : Nat) (b : ByteArray) : Option (ByteArray × Nat) :=
-  let p := i + plainOff a i 0
+  let p := runEnd a i
   let b := if p == i then b else a.copySlice i b b.size (p - i) false
   if h : p < a.size then
     if a[p] == 0x22 then some (b, p + 1)
@@ -249,7 +304,7 @@ def strBytesW (a : ByteArray) (i : Nat) (b : ByteArray) : Option (ByteArray × N
     else decodeCharK a p (fun n j => if p < j then strBytesW a j (pushChar b (Char.ofNat n)) else none) none
   else none
 termination_by a.size - i
-decreasing_by all_goals omega
+decreasing_by all_goals (have := runEnd_ge a i; omega)
 
 /-- `0x80` in every lane of `w` that is `E` or `+` (`lexBad_lane`). -/
 @[inline] def lexBad (w : UInt64) : UInt64 := eqLanes 0x4545454545454545 w ||| eqLanes 0x2b2b2b2b2b2b2b2b w
