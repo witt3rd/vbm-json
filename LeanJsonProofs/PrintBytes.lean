@@ -250,4 +250,12 @@ theorem printBytes_eq (v : Value) : printBytes v = ba (print v) := by
   rw [pushVal_eq]
   apply ByteArray.ext; simp [ByteArray.data_append, ByteArray.emptyWithCapacity] <;> rfl
 
+theorem wordsum (u : UInt64) :
+    u.toUInt8.toUInt64 + ((u >>> 8).toUInt8.toUInt64 <<< 8) + ((u >>> 16).toUInt8.toUInt64 <<< 16) + ((u >>> 24).toUInt8.toUInt64 <<< 24) +
+    ((u >>> 32).toUInt8.toUInt64 <<< 32) + ((u >>> 40).toUInt8.toUInt64 <<< 40) + ((u >>> 48).toUInt8.toUInt64 <<< 48) + ((u >>> 56).toUInt8.toUInt64 <<< 56) = u := by
+  apply UInt64.toNat_inj.mp
+  have h := u.toNat_lt
+  simp [UInt64.toNat_add, UInt64.toNat_shiftLeft, UInt64.toNat_shiftRight, Nat.shiftLeft_eq, Nat.shiftRight_eq_div_pow]
+  omega
+
 end LeanJson

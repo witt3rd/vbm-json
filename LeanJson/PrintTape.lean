@@ -9,21 +9,20 @@ prints is JSON-shaped (structure, strings' UTF-8 and number characters are check
 `escapeChecked a` is `escapeString a` when `a` is valid UTF-8 and `none` otherwise. -/
 namespace LeanJson
 
-/-- The byte at `n`, `0` past the end. -/
-@[inline] def b0 (a : ByteArray) (n : Nat) : UInt8 := if h : n < a.size then a[n] else 0
-
-/-- The little-endian word at word index `i` (`0` past the end). -/
+/-- The little-endian word at word index `i`: eight loads after one bounds test (`0` when the word is not inside `a`; the printer tests before it reads). -/
 def ldw (a : ByteArray) (i : Nat) : UInt64 :=
   let k := 8 * i
-  (b0 a k).toUInt64 + ((b0 a (k + 1)).toUInt64 <<< 8) + ((b0 a (k + 2)).toUInt64 <<< 16) + ((b0 a (k + 3)).toUInt64 <<< 24) +
-  ((b0 a (k + 4)).toUInt64 <<< 32) + ((b0 a (k + 5)).toUInt64 <<< 40) + ((b0 a (k + 6)).toUInt64 <<< 48) + ((b0 a (k + 7)).toUInt64 <<< 56)
+  if h : k + 8 ≤ a.size then
+    (a[k]'(by omega)).toUInt64 + ((a[k + 1]'(by omega)).toUInt64 <<< 8) + ((a[k + 2]'(by omega)).toUInt64 <<< 16) + ((a[k + 3]'(by omega)).toUInt64 <<< 24) +
+    ((a[k + 4]'(by omega)).toUInt64 <<< 32) + ((a[k + 5]'(by omega)).toUInt64 <<< 40) + ((a[k + 6]'(by omega)).toUInt64 <<< 48) + ((a[k + 7]'(by omega)).toUInt64 <<< 56)
+  else 0
 
 /-- The bytes `x[i:e]` are valid UTF-8 (RFC 3629), each sequence inside the range. -/
 def utf8Range (x : ByteArray) (i e : Nat) : Bool :=
   if _h : i < e then
     match byteAt x i with
     | some c =>
-      if c.toNat < 0x80 then utf8Range x (i + 1) e
+      if c < 0x80 then utf8Range x (i + 1) e
       else match decodeUtf8A x i with
         | some (_, j) => if i < j ∧ j ≤ e then utf8Range x j e else false
         | none => false
@@ -35,107 +34,152 @@ termination_by e - i
 def scanDig (x : ByteArray) (i e : Nat) : Nat :=
   if _h : i < e then
     match byteAt x i with
-    | some c => if 0x30 ≤ c.toNat ∧ c.toNat ≤ 0x39 then scanDig x (i + 1) e else i
+    | some c => if 0x30 ≤ c ∧ c ≤ 0x39 then scanDig x (i + 1) e else i
     | none => i
   else i
 termination_by e - i
 
+/-- The index after an optional `-` at `i` (the number starts there). -/
+@[inline] def numSign (x : ByteArray) (i e : Nat) : Nat := if i < e && byteIs x i 0x2D then i + 1 else i
+
+/-- The index after the integer part at `i` (`0`, or a non-zero digit and digits); `0` when there is none. -/
+@[inline] def numInt (x : ByteArray) (i e : Nat) : Nat :=
+  if i < e then
+    (match byteAt x i with
+     | some c => if c == 0x30 then i + 1 else if 0x31 ≤ c.toNat ∧ c.toNat ≤ 0x39 then scanDig x (i + 1) e else 0
+     | none => 0)
+  else 0
+
+/-- The index after an optional fraction (`.` and at least one digit) at `i`; `0` for a `.` with no digit. -/
+@[inline] def numFrac (x : ByteArray) (i e : Nat) : Nat :=
+  if i < e && byteIs x i 0x2E then
+    (if i + 1 < e && (match byteAt x (i + 1) with | some c => 0x30 ≤ c.toNat ∧ c.toNat ≤ 0x39 | none => false) then scanDig x (i + 2) e else 0)
+  else i
+
+/-- The index after an optional exponent (`e` or `E`, an optional sign, at least one digit) at `i`; `0` for an exponent with no digit. -/
+@[inline] def numExp (x : ByteArray) (i e : Nat) : Nat :=
+  if i < e && (byteIs x i 0x65 || byteIs x i 0x45) then
+    (let j := if i + 1 < e && (byteIs x (i + 1) 0x2B || byteIs x (i + 1) 0x2D) then i + 2 else i + 1
+     if j < e && (match byteAt x j with | some c => 0x30 ≤ c.toNat ∧ c.toNat ≤ 0x39 | none => false) then scanDig x (j + 1) e else 0)
+  else i
+
 /-- `x[i:e]` is a number lexeme (RFC 8259: `-`, `0` or a non-zero digit and digits, `.` and at least one digit, `e` or `E`, `+` or `-`, at least one digit), nothing more and nothing less. -/
 def numLex (x : ByteArray) (i e : Nat) : Bool :=
-  let i1 := if i < e && byteIs x i 0x2D then i + 1 else i
-  let i2 := if i1 < e then
-      (match byteAt x i1 with
-       | some c => if c == 0x30 then i1 + 1 else if 0x31 ≤ c.toNat ∧ c.toNat ≤ 0x39 then scanDig x (i1 + 1) e else 0
-       | none => 0)
-    else 0
+  let i2 := numInt x (numSign x i e) e
   if i2 == 0 then false else
-  let i3 := if i2 < e && byteIs x i2 0x2E then
-      (if i2 + 1 < e && (match byteAt x (i2 + 1) with | some c => 0x30 ≤ c.toNat ∧ c.toNat ≤ 0x39 | none => false) then scanDig x (i2 + 2) e else 0)
-    else i2
+  let i3 := numFrac x i2 e
   if i3 == 0 then false else
-  let i4 := if i3 < e && (byteIs x i3 0x65 || byteIs x i3 0x45) then
-      (let j := if i3 + 1 < e && (byteIs x (i3 + 1) 0x2B || byteIs x (i3 + 1) 0x2D) then i3 + 2 else i3 + 1
-       if j < e && (match byteAt x j with | some c => 0x30 ≤ c.toNat ∧ c.toNat ≤ 0x39 | none => false) then scanDig x (j + 1) e else 0)
-    else i3
+  let i4 := numExp x i3 e
   i4 != 0 && i4 == e
 
-/-- The bytes `x[i:e]` (those inside `x`), escaped, appended to `b`. -/
+/-- The end of the run of bytes from `i` that need no escape (not a control, `"` or `\`), at most `e` and at most the end of `x`. -/
+def plainEnd (x : ByteArray) (i e : Nat) : Nat :=
+  if _h : i < e then
+    if h' : i < x.size then
+      if x[i] < 0x20 || x[i] == 0x22 || x[i] == 0x5C then i else plainEnd x (i + 1) e
+    else i
+  else i
+termination_by e - i
+
+/-- The bytes `x[i:e]` (those inside `x`), escaped, appended to `b`: a run that needs no escape is appended with one copy, an escape byte by `pushEsc`. -/
 def escLoopR (x : ByteArray) (i e : Nat) (b : ByteArray) : ByteArray :=
   if _h : i < e then
-    if h' : i < x.size then escLoopR x (i + 1) e (pushEsc b x[i]) else b
+    let j := plainEnd x i e
+    let b := if i < j then x.copySlice i b b.size (j - i) false else b
+    if h' : i ≤ j ∧ j < e ∧ j < x.size then escLoopR x (j + 1) e (pushEsc b (x[j]'h'.2.2)) else b   -- `i ≤ j` always holds (`plainEnd`); the test is what makes the loop terminate
   else b
 termination_by e - i
 
-/-- A string node at word `i`: its text is read from `x`, checked and written as a string literal; the index of the next word. -/
-def pstr (w x : ByteArray) (i : Nat) (b : ByteArray) : Option (ByteArray × Nat) :=
-  if 8 * i + 16 ≤ w.size then
-    let h := ldw w i
-    let aux := ldw w (i + 1)
-    if h % 256 == 4 && aux < 0x4000000000000000 then
-      let len := (h >>> 8).toNat
+/-- A scalar or string node (kind 0 to 4) with the words `h`, `aux`, written to `b`; no bytes at all for a node that is refused (what is written is never empty). A container has kind 5 or 6: refused here. -/
+def pleaf (x : ByteArray) (h aux : UInt64) (b : ByteArray) : ByteArray :=
+  let len := (h >>> 8).toNat
+  let k := h % 256
+  if k == 0 then (if len == 0 && aux == 0 then (((b.push 0x6E).push 0x75).push 0x6C).push 0x6C else ByteArray.empty)
+  else if k == 1 then (if len == 0 && aux == 0 then ((((b.push 0x66).push 0x61).push 0x6C).push 0x73).push 0x65 else ByteArray.empty)
+  else if k == 2 then (if len == 0 && aux == 0 then (((b.push 0x74).push 0x72).push 0x75).push 0x65 else ByteArray.empty)
+  else if k == 3 then
+    if aux < 0x4000000000000000 then
       let off := aux.toNat
-      if off + len ≤ x.size && utf8Range x off (off + len) then some ((escLoopR x off (off + len) (b.push 0x22)).push 0x22, i + 2) else none
-    else none
-  else none
+      if off + len ≤ x.size && numLex x off (off + len) then escLoopR x off (off + len) b else ByteArray.empty
+    else ByteArray.empty
+  else if k == 4 then
+    if aux < 0x4000000000000000 then
+      let off := aux.toNat
+      if off + len ≤ x.size && utf8Range x off (off + len) then (escLoopR x off (off + len) (b.push 0x22)).push 0x22 else ByteArray.empty
+    else ByteArray.empty
+  else ByteArray.empty
 
 mutual
-/-- The node at word `i`, written to `b`, with `d` levels of nesting left; the buffer and the index of the next word. -/
-def pnode (w x : ByteArray) : Nat → Nat → ByteArray → Option (ByteArray × Nat)
-  | 0, _, _ => none
-  | d + 1, i, b =>
+/-- The container (kind 5 or 6) at word `i` with the words `h`, `aux`, written to `b`, with `d` levels of nesting left; the buffer (no bytes: refused) and the index of the next word. A container's `aux` must be the size of what it holds. -/
+def pnode (w x : ByteArray) : Nat → Nat → UInt64 → UInt64 → ByteArray → ByteArray × Nat
+  | 0, _, _, _, _ => (ByteArray.empty, 0)
+  | d + 1, i, h, aux, b =>
+    let len := (h >>> 8).toNat
+    let k := h % 256
+    if k == 5 then
+      match pelems w x d (i + 2) len true (b.push 0x5B) with
+      | (b', j) => if b'.size != 0 && aux == UInt64.ofNat (j - i) then (b'.push 0x5D, j) else (ByteArray.empty, 0)
+    else if k == 6 then
+      match pmembers w x d (i + 2) len true (b.push 0x7B) with
+      | (b', j) => if b'.size != 0 && aux == UInt64.ofNat (j - i) then (b'.push 0x7D, j) else (ByteArray.empty, 0)
+    else (ByteArray.empty, 0)
+  termination_by d => (d, 0, 0)
+
+/-- `n` more elements from word `i`; a comma before each but the first. A scalar or string element is written in place, a container by `pnode`. -/
+def pelems (w x : ByteArray) (d i : Nat) : Nat → Bool → ByteArray → ByteArray × Nat
+  | 0, _, b => (b, i)
+  | n + 1, first, b =>
     if 8 * i + 16 ≤ w.size then
       let h := ldw w i
       let aux := ldw w (i + 1)
-      let len := (h >>> 8).toNat
-      let k := h % 256
-      if k == 0 then (if len == 0 && aux == 0 then some ((((b.push 0x6E).push 0x75).push 0x6C).push 0x6C, i + 2) else none)
-      else if k == 1 then (if len == 0 && aux == 0 then some (((((b.push 0x66).push 0x61).push 0x6C).push 0x73).push 0x65, i + 2) else none)
-      else if k == 2 then (if len == 0 && aux == 0 then some ((((b.push 0x74).push 0x72).push 0x75).push 0x65, i + 2) else none)
-      else if k == 3 then
-        if aux < 0x4000000000000000 then
-          let off := aux.toNat
-          if off + len ≤ x.size && numLex x off (off + len) then some (escLoopR x off (off + len) b, i + 2) else none
-        else none
-      else if k == 4 then pstr w x i b
-      else if k == 5 then
-        match pelems w x d (i + 2) len true (b.push 0x5B) with
-        | some (b', j) => if aux == UInt64.ofNat (j - i) then some (b'.push 0x5D, j) else none
-        | none => none
-      else if k == 6 then
-        match pmembers w x d (i + 2) len true (b.push 0x7B) with
-        | some (b', j) => if aux == UInt64.ofNat (j - i) then some (b'.push 0x7D, j) else none
-        | none => none
-      else none
-    else none
-  termination_by d => (d, 0, 0)
-
-/-- `n` more elements from word `i`; a comma before each but the first. -/
-def pelems (w x : ByteArray) (d i : Nat) : Nat → Bool → ByteArray → Option (ByteArray × Nat)
-  | 0, _, b => some (b, i)
-  | n + 1, first, b =>
-    match pnode w x d i (if first then b else b.push 0x2C) with
-    | some (b', j) => pelems w x d j n false b'
-    | none => none
+      let b := if first then b else b.push 0x2C
+      if h % 256 ≤ 4 then
+        let r := pleaf x h aux b
+        if r.size == 0 then (ByteArray.empty, 0) else pelems w x d (i + 2) n false r
+      else
+        match pnode w x d i h aux b with
+        | (b', j) => if b'.size == 0 then (ByteArray.empty, 0) else pelems w x d j n false b'
+    else (ByteArray.empty, 0)
   termination_by n => (d, 1, n)
 
 /-- `n` more members (a string node, its value) from word `i`; a comma before each but the first. -/
-def pmembers (w x : ByteArray) (d i : Nat) : Nat → Bool → ByteArray → Option (ByteArray × Nat)
-  | 0, _, b => some (b, i)
+def pmembers (w x : ByteArray) (d i : Nat) : Nat → Bool → ByteArray → ByteArray × Nat
+  | 0, _, b => (b, i)
   | n + 1, first, b =>
-    match pstr w x i (if first then b else b.push 0x2C) with
-    | some (b1, j1) =>
-      match pnode w x d j1 (b1.push 0x3A) with
-      | some (b2, j2) => pmembers w x d j2 n false b2
-      | none => none
-    | none => none
+    if 8 * i + 32 ≤ w.size then
+      let h := ldw w i
+      let aux := ldw w (i + 1)
+      let b := if first then b else b.push 0x2C
+      if h % 256 == 4 then
+        let r := pleaf x h aux b
+        if r.size == 0 then (ByteArray.empty, 0) else
+        let b1 := r.push 0x3A
+        let h2 := ldw w (i + 2)
+        let aux2 := ldw w (i + 3)
+        if h2 % 256 ≤ 4 then
+          let r2 := pleaf x h2 aux2 b1
+          if r2.size == 0 then (ByteArray.empty, 0) else pmembers w x d (i + 4) n false r2
+        else
+          match pnode w x d (i + 2) h2 aux2 b1 with
+          | (b', j) => if b'.size == 0 then (ByteArray.empty, 0) else pmembers w x d j n false b'
+      else (ByteArray.empty, 0)
+    else (ByteArray.empty, 0)
   termination_by n => (d, 1, n)
 end
 
 /-- The compact JSON of the tape `(w, x)`, or `none` for a tape that is refused. -/
 def printTape (w x : ByteArray) : Option ByteArray :=
-  match pnode w x (maxDepth + 1) 0 (ByteArray.emptyWithCapacity (x.size + w.size / 4 + 16)) with
-  | some (b, j) => if 8 * j == w.size then some b else none
-  | none => none
+  if 16 ≤ w.size then
+    let h := ldw w 0
+    let aux := ldw w 1
+    let b := ByteArray.emptyWithCapacity (x.size + w.size / 4 + 16)
+    if h % 256 ≤ 4 then
+      let r := pleaf x h aux b
+      if r.size != 0 && w.size == 16 then some r else none
+    else
+      match pnode w x maxDepth 0 h aux b with
+      | (r, j) => if r.size != 0 && 8 * j == w.size then some r else none
+  else none
 
 /-- The string literal of `a`, when `a` is valid UTF-8. -/
 def escapeChecked (a : ByteArray) : Option ByteArray :=
