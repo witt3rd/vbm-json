@@ -1,9 +1,7 @@
 import Lean
 import LeanJson
 import LeanJsonProofs
-import LeanJsonSimd
-import VbmSimd
-import VbmSimdProofs
+import LeanJsonSimd.ParseSimd
 /-! Axiom gate (Tier 1 here: the library is small, so it is cheap): every constant defined in a `LeanJson`, `LeanJsonProofs`, `LeanJsonSimd`, `VbmSimd` (the pinned dependency) or `VbmSimdProofs` module may depend only
 on the three standard axioms. Exits non-zero (and names the offenders) otherwise. `--selftest` also proves the gate can fail: a
 synthetic constant that declares a non-standard axiom is added to the environment, and the audit must reject it. -/

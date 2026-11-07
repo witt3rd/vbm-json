@@ -5,7 +5,7 @@ package «vbm-json» where
   leanOptions := #[⟨`warningAsError, true⟩, ⟨`autoImplicit, false⟩]
 
 /-- The reusable verified bit-parallel kernels (the model of the vector operations, the proved kernels, the trusted shim header): a pinned dependency. -/
-require «vbm-simd» from git "https://github.com/witt3rd/vbm-simd" @ "9f74d05dd20d856f3a74b458b08e32a297827411"
+require «vbm-simd» from git "https://github.com/witt3rd/vbm-simd" @ "ce24f5e4702d63b6e479174534d64f036fbaf846"
 
 /-- The library: specification and code, one Lean core. Imports `Init` only (checked by Tier 1): this is what is compiled to C, to WASM and into
 every consumer, so nothing from `Std` or `Lean` may be in its closure (a `Lean.*` import forces full runtime initialisation). The export `vbm_json_parse_tape` is the bit-parallel parser of `LeanJsonSimd`, so the objects of that
