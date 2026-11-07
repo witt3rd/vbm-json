@@ -285,7 +285,7 @@ theorem scanNumK_spec (a : ByteArray) (hs : a.size < 2 ^ 31) (i : USize) (hi : i
       · rcases scanFracU_eq a hs (scanIntU a i1) (by omega) (by omega) with ⟨z, -⟩ | ⟨n2, ho2, hr2, hp2, hb2⟩
         · exact absurd ((usize_beq_zero _).2 z) h2
         · have hn2 : scanFrac a n1 = some n2 := by rw [← eFrac, ← hr1]; exact ho2
-          refine ⟨byteIsU a (scanFracU a (scanIntU a i1)) 0x45 || (byteIsU a (scanFracU a (scanIntU a i1)) 0x65 && byteIsU a (scanFracU a (scanIntU a i1) + 1) 0x2B), fun β k => ?_, fun hne => ?_⟩
+          refine ⟨scanExpU a (scanFracU a (scanIntU a i1)) != scanFracU a (scanIntU a i1) && (byteIsU a (scanFracU a (scanIntU a i1)) 0x45 || (byteIsU a (scanFracU a (scanIntU a i1)) 0x65 && byteIsU a (scanFracU a (scanIntU a i1) + 1) 0x2B)), fun β k => ?_, fun hne => ?_⟩
           · unfold scanNumK scanNumU; simp only [hi1d, h1, h2, Bool.false_eq_true, ↓reduceIte]
           · unfold scanNumU at hne ⊢
             simp only [hi1d, h1, h2, Bool.false_eq_true, ↓reduceIte] at hne ⊢
@@ -306,7 +306,15 @@ theorem scanNumK_spec (a : ByteArray) (hs : a.size < 2 ^ 31) (i : USize) (hi : i
               have hr2n : (r2 + 1).toNat = r2.toNat + 1 := succ_toNat a hs r2 (by omega)
               have hflag : (byteIsU a r2 0x45 || (byteIsU a r2 0x65 && byteIsU a (r2 + 1) 0x2B)) = (byteIs a n2 0x45 || (byteIs a n2 0x65 && byteIs a (n2 + 1) 0x2B)) := by
                 rw [byteIsU_eq a hs32, byteIsU_eq a hs32, byteIsU_eq a hs32, hr2n, hr2]
-              rw [hflag, ← hexp]
+              have hdet : ((scanExpU a r2 != r2) && (byteIsU a r2 0x45 || (byteIsU a r2 0x65 && byteIsU a (r2 + 1) 0x2B))) = (byteIsU a r2 0x45 || (byteIsU a r2 0x65 && byteIsU a (r2 + 1) 0x2B)) := by
+                by_cases hEq : scanExpU a r2 = r2
+                · have hnj : nj = n2 := by rw [← hrj, hEq, hr2]
+                  have hfl : (byteIs a n2 0x45 || (byteIs a n2 0x65 && byteIs a (n2 + 1) 0x2B)) = false := hexp.1 (fun k h1 h2 => by exfalso; omega)
+                  rw [← hflag] at hfl
+                  simp only [hEq, bne_self_eq_false, Bool.false_and, hfl]
+                · have : (scanExpU a r2 != r2) = true := by simpa using hEq
+                  simp only [this, Bool.true_and]
+              rw [hdet, hflag, ← hexp]
               constructor
               · intro hall k hk1 hk2; have := hLpre.1; exact hall k (by omega) hk2
               · intro hall k hk1 hk2

@@ -540,12 +540,14 @@ decreasing_by
   if r2 == 0 then 0 else scanExpU a r2
 
 /-- `scanNumU` with a flag, in continuation-passing style: `k` takes the end (`0` for no number) and whether the lexeme has an `E` or a `+` (so that its canonical form is not the input). Those bytes can only be in the exponent: the
-exponent letter is `E`, or it is `e` and the byte after it is `+`; the flag is read from those two bytes at the end of the fraction, not by a second pass over the lexeme (`scanNumK_spec`, `LeanJsonProofs/NumFlag.lean`). -/
+exponent letter is `E`, or it is `e` and the byte after it is `+`; the flag is read from those two bytes at the end of the fraction, and only when an exponent was consumed (`r3 != r2`: a number without one, the common case, reads no byte), not by a second pass over the lexeme (`scanNumK_spec`, `LeanJsonProofs/NumFlag.lean`). -/
 @[inline] def scanNumK {β : Type} (a : ByteArray) (i : USize) (k : USize → Bool → β) : β :=
   let r1 := scanIntU a (if byteIsU a i 0x2D then i + 1 else i)
   if r1 == 0 then k 0 false else
   let r2 := scanFracU a r1
-  if r2 == 0 then k 0 false else k (scanExpU a r2) (byteIsU a r2 0x45 || (byteIsU a r2 0x65 && byteIsU a (r2 + 1) 0x2B))
+  if r2 == 0 then k 0 false else
+  let r3 := scanExpU a r2
+  k r3 (r3 != r2 && (byteIsU a r2 0x45 || (byteIsU a r2 0x65 && byteIsU a (r2 + 1) 0x2B)))
 
 /-- `lexOk`, in `USize`. -/
 def lexOkU (a : ByteArray) (p e : USize) : Bool :=
@@ -914,7 +916,7 @@ decreasing_by all_goals exact fuel_dec f ‹_›
   (x * (0x0101010101010101 : UInt64)) >>> 56
 
 /-- The number of set bits in the words `k .. n - 1` of the mask array, added to `acc` (a capacity hint: no theorem depends on its value; the tape holds at most two words per node and every node starts at a set bit of the structural mask).
-A tail call over `USize` (the first version counted in `Nat`: about 70 instructions per word, 6% of a parse of small tokens). -/
+A tail call over `USize` (the first version counted in `Nat`: about 70 instructions per word). Counting four words at a time with one reduction (byte counts added before the horizontal sum) measured no better. -/
 def popLoopU (m : ByteArray) (k n acc : USize) : USize :=
   if _h : k < n then popLoopU m (k + 1) n (acc + (popcnt64 (ld64 m (k <<< 3))).toUSize) else acc
 termination_by n.toNat - k.toNat

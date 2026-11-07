@@ -467,3 +467,20 @@ Same harness (instructions retired and user cycles per input byte, the minimum o
 | twitter | 631515 | 20.11 | 20.04 | 5.21 | 5.18 |
 
 (The cycle columns of the rows whose code did not change differ by up to 25% between the two runs: the host was shared. Only string-heavy runs the changed code to a measurable degree.)
+
+## Round four, slice 5: the short append without a prologue (vbm-simd `9f74d05`), the number's flag only after an exponent
+
+Two small things the profile showed. (1) `vbm_simd_append` (the text of every string and number: 9% of the scorecard corpus and of small-objects) was 40 instructions on its fast path: five callee-saved pushes and pops, because its general case (three conversions of a size to a Lean number, a call to the runtime's `copySlice`) needed registers across calls. The general case is now a function of its own (`vbm_simd_append_slow`) and the fast path is 28 instructions, with no prologue (vbm-simd `9f74d05`: the same clause VS-13 and ledger entry T13, the same tests and eleven mutants; one mutant's pattern follows the new text of the guard). (2) `scanNumK` read the byte at the end of the fraction (and the one after it) for every number to decide whether the lexeme has an `E` or a `+`; those bytes are examined only when an exponent was consumed (`r3 != r2`): a number without one, the common case, reads nothing (`scanNumK_spec` keeps its statement; the proof adds `hdet`: with no exponent consumed the flag is false, from `exp_lex` over an empty range). Two experiments that did not pay were dropped: the capacity hint's popcount four words at a time (the byte counts of four words added before one reduction: no instruction saved) and, in slice 4, the run copy by `appendBytes`.
+
+An experiment to price the number path of canada (instructions per input byte, each variant built from this tree with one piece removed, outputs not checked: for the measurement only): no text copy (`appendBytes` and its size arithmetic) -2.8 (-56 instructions per number), the flag test and the `pushLex` branch -1.4, the second store of the tape node (`putNodeU` as one store) -0.75, the delimiter test after the number -0.4.
+
+Same harness (instructions retired and user cycles per input byte, the minimum of 30 parses on CPU 8, **host x load 22 to 76 during these runs, not quiet; the cycle columns are noisy**; outputs byte-identical, checked by `cmp`). Before = main after slice 4 (`99134d2`), after = this slice:
+
+| corpus | bytes | instr/B before | instr/B after | cycles/B before | cycles/B after |
+|---|---|---|---|---|---|
+| canada | 2251051 | 26.52 | 25.48 | 6.86 | 5.96 |
+| citm_catalog | 1727204 | 12.65 | 12.25 | 2.87 | 2.88 |
+| scorecard corpus | 1033424 | 34.17 | 32.65 | 8.51 | 8.76 |
+| small-objects | 2412355 | 53.10 | 50.61 | 12.20 | 12.06 |
+| string-heavy | 2915939 | 20.68 | 20.34 | 5.67 | 5.08 |
+| twitter | 631515 | 20.04 | 19.57 | 5.12 | 5.00 |
