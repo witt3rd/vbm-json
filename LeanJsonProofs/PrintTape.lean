@@ -851,7 +851,7 @@ theorem container_depth (v : Value) (h : 5 ≤ vKind v) : 1 ≤ v.depth := by
 mutual
 theorem pnode_eq : ∀ (v : Value) (d : Nat) (w x : ByteArray) (i o : Nat) (b : ByteArray), 5 ≤ vKind v → v.depth ≤ d + 1 →
     TapeOk w x i o (tapeV o v) (textV v) → wordsV v < 2 ^ 50 → o + (textV v).length < 2 ^ 50 →
-    pnode w x (d + 1) i (headW v) (auxW o v) b = (b ++ ba (print v), i + wordsV v)
+    pnode ldw pleaf w x (d + 1) i (headW v) (auxW o v) b = (b ++ ba (print v), i + wordsV v)
   | .arr xs, d, w, x, i, o, b, hk, hd, hT, hw, ho => by
     simp only [Value.depth] at hd
     have hT' : TapeOk w x i o (wordBytes (headW (.arr xs)) ++ wordBytes (auxW o (.arr xs)) ++ tapeL o xs) ([] ++ textL xs) := by
@@ -910,7 +910,7 @@ theorem pnode_eq : ∀ (v : Value) (d : Nat) (w x : ByteArray) (i o : Nat) (b : 
 
 theorem pelems_eq : ∀ (vs : List Value) (d : Nat) (w x : ByteArray) (i o : Nat) (first : Bool) (b : ByteArray),
     depthList vs ≤ d → TapeOk w x i o (tapeL o vs) (textL vs) → wordsL vs < 2 ^ 50 → o + (textL vs).length < 2 ^ 50 →
-    pelems w x d i vs.length first b = (b ++ ba (pElemsFrom first vs), i + wordsL vs)
+    pelems ldw pleaf w x d i vs.length first b = (b ++ ba (pElemsFrom first vs), i + wordsL vs)
   | [], d, w, x, i, o, first, b, _, _, _, _ => by
     simp [pelems, pElemsFrom, wordsL, ba_nil]
   | v :: vs, d, w, x, i, o, first, b, hd, hT, hw, ho => by
@@ -958,7 +958,7 @@ theorem pelems_eq : ∀ (vs : List Value) (d : Nat) (w x : ByteArray) (i o : Nat
 
 theorem pmembers_eq : ∀ (ms : List (String × Value)) (d : Nat) (w x : ByteArray) (i o : Nat) (first : Bool) (b : ByteArray),
     depthMembers ms ≤ d → TapeOk w x i o (tapeM o ms) (textM ms) → wordsM ms < 2 ^ 50 → o + (textM ms).length < 2 ^ 50 →
-    pmembers w x d i ms.length first b = (b ++ ba (pMembersFrom first ms), i + wordsM ms)
+    pmembers ldw pleaf w x d i ms.length first b = (b ++ ba (pMembersFrom first ms), i + wordsM ms)
   | [], d, w, x, i, o, first, b, _, _, _, _ => by
     simp [pmembers, pMembersFrom, wordsM, ba_nil]
   | (k, v) :: ms, d, w, x, i, o, first, b, hd, hT, hw, ho => by
@@ -1048,7 +1048,7 @@ theorem printTape_encode (v : Value) (hd : v.depth ≤ maxDepth) (hw : wordsV v 
   obtain ⟨hsz, hr1, hr2⟩ := read_node (i := 0) (o := 0) (v := v) (P := []) (Q := []) (by rw [hwL]; simp) rfl
   have hlenv := vLen_lt v (by omega) (by omega)
   obtain ⟨hk, hlen⟩ := head_mod v hlenv
-  unfold printTape
+  unfold printTape printTapeG
   simp only [show 16 ≤ w.size by omega, ↓reduceIte, hr1, hr2, hk]
   by_cases hleaf : vKind v ≤ 4
   · have hl2 := leaf_words v hleaf

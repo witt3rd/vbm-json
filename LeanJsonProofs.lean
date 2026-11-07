@@ -10,6 +10,7 @@ import LeanJsonProofs.Fast
 import LeanJsonProofs.Tape
 import LeanJsonProofs.PrintBytes
 import LeanJsonProofs.PrintTape
+import LeanJsonProofs.PrintSimd
 import LeanJsonProofs.Layout
 import LeanJsonProofs.FastTape
 import LeanJsonProofs.FastNum

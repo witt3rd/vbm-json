@@ -23,9 +23,9 @@ _Static_assert(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__, "the tape is little-en
 
 lean_object *vbm_json_parse_tape(lean_object *input);     /* the Lean export (LeanJsonSimd/ParseSimd.lean: parseTapeSimd) */
 lean_object *initialize_vbm_x2djson_LeanJsonSimd_ParseSimd(uint8_t builtin);   /* Lean 4.35 names it package_Module; it also initialises the runtime and Init */
-lean_object *vbm_json_lean_print_tape(lean_object *words, lean_object *text);   /* the Lean exports of LeanJson/PrintTape.lean: the JSON bytes, or no bytes for a refused tape */
+lean_object *vbm_json_lean_print_tape(lean_object *words, lean_object *text);   /* the Lean exports of LeanJsonSimd/PrintSimd.lean (print) and LeanJson/PrintTape.lean (escape): the JSON bytes, or no bytes for a refused tape */
 lean_object *vbm_json_lean_escape_string(lean_object *text);                    /* the string literal, or no bytes for text that is not valid UTF-8 */
-lean_object *initialize_vbm_x2djson_LeanJson_PrintTape(uint8_t builtin);
+lean_object *initialize_vbm_x2djson_LeanJsonSimd_PrintSimd(uint8_t builtin);
 
 /* Once-only initialisation: 0 = not started, 1 = running, 2 = done. A concurrent first caller waits for the first to finish. */
 static int once_state_;
@@ -37,7 +37,7 @@ static void init_once_(void) {
     lean_object *r = initialize_vbm_x2djson_LeanJsonSimd_ParseSimd(1);
     init_ok_ = lean_io_result_is_ok(r);
     lean_dec_ref(r);
-    if (init_ok_) { r = initialize_vbm_x2djson_LeanJson_PrintTape(1); init_ok_ = lean_io_result_is_ok(r); lean_dec_ref(r); }
+    if (init_ok_) { r = initialize_vbm_x2djson_LeanJsonSimd_PrintSimd(1); init_ok_ = lean_io_result_is_ok(r); lean_dec_ref(r); }
     lean_io_mark_end_initialization();
     __atomic_store_n(&once_state_, 2, __ATOMIC_RELEASE);
   } else {

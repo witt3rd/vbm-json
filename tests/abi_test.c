@@ -326,7 +326,7 @@ static int fx_copy;   /* 1: the copy of the shim sees every result as shared, so
 #define vbm_json_bytes_free fx_bytes_free
 #define vbm_json_lean_print_tape fx_print
 #define vbm_json_lean_escape_string fx_escape
-#define initialize_vbm_x2djson_LeanJson_PrintTape fx_init
+#define initialize_vbm_x2djson_LeanJsonSimd_PrintSimd fx_init
 #define vbm_json_parse_tape fx_export
 #define initialize_vbm_x2djson_LeanJsonSimd_ParseSimd fx_init
 #define lean_alloc_sarray fx_alloc_sarray
@@ -335,7 +335,7 @@ static int fx_copy;   /* 1: the copy of the shim sees every result as shared, so
 #undef memcpy
 #undef lean_alloc_sarray
 #undef initialize_vbm_x2djson_LeanJsonSimd_ParseSimd
-#undef initialize_vbm_x2djson_LeanJson_PrintTape
+#undef initialize_vbm_x2djson_LeanJsonSimd_PrintSimd
 #undef vbm_json_lean_escape_string
 #undef vbm_json_lean_print_tape
 #undef vbm_json_bytes_free

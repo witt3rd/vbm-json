@@ -110,84 +110,83 @@ def pleaf (x : ByteArray) (h aux : UInt64) (b : ByteArray) : ByteArray :=
   else ByteArray.empty
 
 mutual
-/-- The container (kind 5 or 6) at word `i` with the words `h`, `aux`, written to `b`, with `d` levels of nesting left; the buffer (no bytes: refused) and the index of the next word. A container's `aux` must be the size of what it holds. -/
-def pnode (w x : ByteArray) : Nat → Nat → UInt64 → UInt64 → ByteArray → ByteArray × Nat
+/-- The printer is generic in the word load `ld` and the leaf writer `lf` (`ldw`, `pleaf` here; a faster pair with the proved equations in `LeanJsonSimd/PrintSimd.lean`): the code is the same. The container (kind 5 or 6) at word `i` with the words `h`, `aux`, written to `b`, with `d` levels of nesting left; the buffer (no bytes: refused) and the index of the next word. A container's `aux` must be the size of what it holds. -/
+@[specialize] def pnode (ld : ByteArray → Nat → UInt64) (lf : ByteArray → UInt64 → UInt64 → ByteArray → ByteArray) (w x : ByteArray) : Nat → Nat → UInt64 → UInt64 → ByteArray → ByteArray × Nat
   | 0, _, _, _, _ => (ByteArray.empty, 0)
   | d + 1, i, h, aux, b =>
     let len := (h >>> 8).toNat
     let k := h % 256
     if k == 5 then
-      match pelems w x d (i + 2) len true (b.push 0x5B) with
+      match pelems ld lf w x d (i + 2) len true (b.push 0x5B) with
       | (b', j) => if b'.size != 0 && aux == UInt64.ofNat (j - i) then (b'.push 0x5D, j) else (ByteArray.empty, 0)
     else if k == 6 then
-      match pmembers w x d (i + 2) len true (b.push 0x7B) with
+      match pmembers ld lf w x d (i + 2) len true (b.push 0x7B) with
       | (b', j) => if b'.size != 0 && aux == UInt64.ofNat (j - i) then (b'.push 0x7D, j) else (ByteArray.empty, 0)
     else (ByteArray.empty, 0)
   termination_by d => (d, 0, 0)
 
 /-- `n` more elements from word `i`; a comma before each but the first. A scalar or string element is written in place, a container by `pnode`. -/
-def pelems (w x : ByteArray) (d i : Nat) : Nat → Bool → ByteArray → ByteArray × Nat
+@[specialize] def pelems (ld : ByteArray → Nat → UInt64) (lf : ByteArray → UInt64 → UInt64 → ByteArray → ByteArray) (w x : ByteArray) (d i : Nat) : Nat → Bool → ByteArray → ByteArray × Nat
   | 0, _, b => (b, i)
   | n + 1, first, b =>
     if 8 * i + 16 ≤ w.size then
-      let h := ldw w i
-      let aux := ldw w (i + 1)
+      let h := ld w i
+      let aux := ld w (i + 1)
       let b := if first then b else b.push 0x2C
       if h % 256 ≤ 4 then
-        let r := pleaf x h aux b
-        if r.size == 0 then (ByteArray.empty, 0) else pelems w x d (i + 2) n false r
+        let r := lf x h aux b
+        if r.size == 0 then (ByteArray.empty, 0) else pelems ld lf w x d (i + 2) n false r
       else
-        match pnode w x d i h aux b with
-        | (b', j) => if b'.size == 0 then (ByteArray.empty, 0) else pelems w x d j n false b'
+        match pnode ld lf w x d i h aux b with
+        | (b', j) => if b'.size == 0 then (ByteArray.empty, 0) else pelems ld lf w x d j n false b'
     else (ByteArray.empty, 0)
   termination_by n => (d, 1, n)
 
 /-- `n` more members (a string node, its value) from word `i`; a comma before each but the first. -/
-def pmembers (w x : ByteArray) (d i : Nat) : Nat → Bool → ByteArray → ByteArray × Nat
+@[specialize] def pmembers (ld : ByteArray → Nat → UInt64) (lf : ByteArray → UInt64 → UInt64 → ByteArray → ByteArray) (w x : ByteArray) (d i : Nat) : Nat → Bool → ByteArray → ByteArray × Nat
   | 0, _, b => (b, i)
   | n + 1, first, b =>
     if 8 * i + 32 ≤ w.size then
-      let h := ldw w i
-      let aux := ldw w (i + 1)
+      let h := ld w i
+      let aux := ld w (i + 1)
       let b := if first then b else b.push 0x2C
       if h % 256 == 4 then
-        let r := pleaf x h aux b
+        let r := lf x h aux b
         if r.size == 0 then (ByteArray.empty, 0) else
         let b1 := r.push 0x3A
-        let h2 := ldw w (i + 2)
-        let aux2 := ldw w (i + 3)
+        let h2 := ld w (i + 2)
+        let aux2 := ld w (i + 3)
         if h2 % 256 ≤ 4 then
-          let r2 := pleaf x h2 aux2 b1
-          if r2.size == 0 then (ByteArray.empty, 0) else pmembers w x d (i + 4) n false r2
+          let r2 := lf x h2 aux2 b1
+          if r2.size == 0 then (ByteArray.empty, 0) else pmembers ld lf w x d (i + 4) n false r2
         else
-          match pnode w x d (i + 2) h2 aux2 b1 with
-          | (b', j) => if b'.size == 0 then (ByteArray.empty, 0) else pmembers w x d j n false b'
+          match pnode ld lf w x d (i + 2) h2 aux2 b1 with
+          | (b', j) => if b'.size == 0 then (ByteArray.empty, 0) else pmembers ld lf w x d j n false b'
       else (ByteArray.empty, 0)
     else (ByteArray.empty, 0)
   termination_by n => (d, 1, n)
 end
 
-/-- The compact JSON of the tape `(w, x)`, or `none` for a tape that is refused. -/
-def printTape (w x : ByteArray) : Option ByteArray :=
+/-- The compact JSON of the tape `(w, x)`, or `none` for a tape that is refused (generic in the load and the leaf writer, as `pnode`). -/
+@[specialize] def printTapeG (ld : ByteArray → Nat → UInt64) (lf : ByteArray → UInt64 → UInt64 → ByteArray → ByteArray) (w x : ByteArray) : Option ByteArray :=
   if 16 ≤ w.size then
-    let h := ldw w 0
-    let aux := ldw w 1
+    let h := ld w 0
+    let aux := ld w 1
     let b := ByteArray.emptyWithCapacity (x.size + w.size / 4 + 16)
     if h % 256 ≤ 4 then
-      let r := pleaf x h aux b
+      let r := lf x h aux b
       if r.size != 0 && w.size == 16 then some r else none
     else
-      match pnode w x maxDepth 0 h aux b with
+      match pnode ld lf w x maxDepth 0 h aux b with
       | (r, j) => if r.size != 0 && 8 * j == w.size then some r else none
   else none
+
+/-- The compact JSON of the tape `(w, x)` with the reference load and leaf writer. -/
+def printTape (w x : ByteArray) : Option ByteArray := printTapeG ldw pleaf w x
 
 /-- The string literal of `a`, when `a` is valid UTF-8. -/
 def escapeChecked (a : ByteArray) : Option ByteArray :=
   if utf8Range a 0 a.size then some (escapeString a) else none
-
-/-- The export `vbm_json_lean_print_tape` (called by `vbm_json_print_tape` in `abi/vbm_json.c`): the JSON bytes, or no bytes for a refused tape (printed JSON is never empty). -/
-@[export vbm_json_lean_print_tape]
-def printTapeExport (w x : ByteArray) : ByteArray := (printTape w x).getD ByteArray.empty
 
 /-- The export `vbm_json_lean_escape_string` (called by `vbm_json_escape_string`): the string literal, or no bytes for text that is not valid UTF-8 (a literal is never empty). -/
 @[export vbm_json_lean_escape_string]

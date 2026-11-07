@@ -23,7 +23,7 @@ for f in Value Policy Grammar Reference Print Parse Struct Tape PrintBytes Print
 done
 # the bit-parallel parser (the export `vbm_json_parse_tape`): LeanJsonSimd and the pinned dependency VbmSimd, each with the dependency's trusted header (docs/trust-ledger.md T14) included first
 hdr="$here/.lake/packages/vbm-simd/include/vbm_simd.h"; [ -f "$hdr" ] || { echo "build_native: $hdr missing" >&2; exit 1; }
-for f in LeanJsonSimd/Stage1 LeanJsonSimd/ParseSimd; do
+for f in LeanJsonSimd/Stage1 LeanJsonSimd/ParseSimd LeanJsonSimd/PrintSimd; do
   [ -f ".lake/build/ir/$f.c" ] || { echo "build_native: .lake/build/ir/$f.c missing" >&2; exit 1; }
   cc "${cf[@]}" -include "$hdr" -c ".lake/build/ir/$f.c" -o "$tmp/s_$(basename "$f").o"; objs+=("$tmp/s_$(basename "$f").o")
 done

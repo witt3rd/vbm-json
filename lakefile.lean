@@ -14,7 +14,7 @@ library and of the pinned `VbmSimd` modules it uses are archived with this libra
 lean_lib LeanJson where
   -- every module under LeanJson/ is built, imported by the umbrella or not: a module cannot hide from the build
   globs := #[.andSubmodules `LeanJson]
-  moreLinkObjs := #[`+LeanJsonSimd.Stage1:o, `+LeanJsonSimd.ParseSimd:o, `@«vbm-simd»/+VbmSimd.Spec:o, `@«vbm-simd»/+VbmSimd.Lanes:o, `@«vbm-simd»/+VbmSimd.Escape:o, `@«vbm-simd»/+VbmSimd.PrefixXor:o,
+  moreLinkObjs := #[`+LeanJsonSimd.Stage1:o, `+LeanJsonSimd.ParseSimd:o, `+LeanJsonSimd.PrintSimd:o, `@«vbm-simd»/+VbmSimd.Spec:o, `@«vbm-simd»/+VbmSimd.Lanes:o, `@«vbm-simd»/+VbmSimd.Escape:o, `@«vbm-simd»/+VbmSimd.PrefixXor:o,
     `@«vbm-simd»/+VbmSimd.Shims:o, `@«vbm-simd»/+VbmSimd.Bytes:o, `@«vbm-simd»/+VbmSimd.Cursor:o, `@«vbm-simd»/+VbmSimd.Find:o, `@«vbm-simd»/+VbmSimd.Inset:o, `@«vbm-simd»/+VbmSimd.Append:o, `@«vbm-simd»/+VbmSimd.Classify:o]
 
 /-- The bit-parallel structural stage and the index-driven parser (docs/perf/simd-plan.md): `LeanJson` plus the pinned dependency `VbmSimd` (checked by scripts/test_simd_imports.sh). Compiled with the dependency's trusted shim
