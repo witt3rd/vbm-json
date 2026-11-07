@@ -39,7 +39,7 @@ int main(int argc, char **argv) {
   if (!strcmp(argv[2], "bench")) {
     double r[5];
     for (int w = 0; w < 5; w++) { long it = 0; double a = now(), e; do { vbm_json_print_tape(&t, NULL, &o); vbm_json_bytes_free(&o); it++; e = now() - a; } while (e < secs / 5); r[w] = it * (double)on / 1e6 / e; }
-    qsort(r, 5, sizeof *r, cmp); printf("%.1f %.1f\n", r[2], r[4]); return 0;   /* median and best window, MB/s of output */
+    qsort(r, 5, sizeof *r, cmp); printf("%.1f %.1f %zu\n", r[2], r[4], on); return 0;   /* median and best window, MB/s of output; the output size */
   }
   if (!strcmp(argv[2], "escape")) {
     double r[5]; vbm_json_bytes e0;

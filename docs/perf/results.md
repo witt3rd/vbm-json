@@ -410,3 +410,28 @@ Through the same harness as slice 1 (instructions retired and user cycles per in
 | twitter | 631515 | 26.09 | 20.44 | 6.45 | 5.20 |
 
 Only the corpora with a string that has a non-ASCII byte or an escape (string-heavy, twitter) run the changed code; the others are identical to the instruction. What is left in the string leaf: the escape path of `strBytesV` (`\uXXXX`, the surrogate pair, `\n`: `decodeCharK` on `Nat`, `pushChar` one runtime call per byte) is 25% of string-heavy and is not on `USize` yet.
+
+## The printer: `vbm_json_print_tape` and `vbm_json_escape_string` (round four, printer slices 1 to 4)
+
+Measured through the C ABI by `docs/perf/printbench.c` (a harness like `prof.c`, not part of any gate): the document is parsed once; what is timed is `vbm_json_print_tape` of that tape, the whole call (copy of the tape into the runtime, the print, the hand-out of the bytes, the free). Host x, pinned to CPU 8, tree `72cbc66`, **host load average 18 to 31 during the runs (other tenants; the machine was saturated, so the wall-clock rates are low and noisy: three sessions, the best window of any is given next to the median of the last)**. The instruction count does not depend on the load; cycles do. MB/s are of the **output** (the compact JSON), parse MB/s of the input document in the same session.
+
+| corpus | output bytes | instr/B | cycles/B (min of 21) | print MB/s, median (last session) | print MB/s, best window (any session) | parse MB/s (same session) | print / parse |
+|---|---|---|---|---|---|---|---|
+| canada | 2251027 | 90.0 | 17.1 | 117.4 | 123.7 | 277.5 | 0.42 |
+| citm_catalog | 500299 | 110.0 | 19.8 | 87.1 | 114.0 | 610.8 | 0.14 (the input is 3.45 times the output: whitespace) |
+| scorecard corpus | 933425 | 113.9 | 21.7 | 86.3 | 99.9 | 207.0 | 0.42 |
+| small-objects | 2412355 | 146.4 | 26.3 | 70.3 | 77.9 | 126.0 | 0.56 |
+| string-heavy | 2785939 | 63.5 | 13.9 | 116.0 | 162.3 | 229.7 | 0.51 |
+| twitter | 466906 | 73.7 | 16.0 | 80.7 | 137.3 | 189.2 | 0.43 |
+
+`vbm_json_escape_string` (the document's own bytes as text; valid UTF-8 on the corpora that are ASCII or valid UTF-8): 90 to 200 MB/s, the same loops as the strings of the printer (`utf8Range`, `plainEnd`).
+
+Where it started: the first printer (`pnode` returning `Option (ByteArray × Nat)` for every node, a byte pushed at a time) ran at 32 to 62 MB/s of output (90 to 190 instructions per output byte on canada and small-objects) with 25% of the samples in the allocator (two heap objects per node). Runs copied with one `copySlice` (a string or a lexeme: `plainEnd` finds the run that needs no escape) and no allocation per scalar node (a scalar or string element is written in place by `pleaf`, only a container returns a pair) took canada from 32 to 101 MB/s and string-heavy from 62 to 115, at the load of that session.
+
+### Where the time goes, and the class
+
+The sampler (`printbench FILE sample`, `docs/perf/resolve.py`) on the final code: small-objects: `ldw` 42%, `lean_byte_array_push` 11%, `copySlice` 7%, `pmembers` 6.5%, `plainEnd` 6%; canada: `plainEnd` 26%, `ldw` 21%, `scanDig` 20.5%, `numLex` 5.4%; string-heavy: `plainEnd` 36%, `utf8Range` 29%, `ldw` 14%. The allocator is under 3% everywhere.
+
+1. **The class is the parser's: per-token and per-byte overhead of Lean-emitted code on boxed `Nat` positions.** Each byte of a text is visited by three loops (the UTF-8 check `utf8Range`, the scan for the end of the run that needs no escape `plainEnd`, and the copy, one `copySlice` per run), and each iteration is a `Nat` add with an overflow test, a `Nat` compare with the array size and an unboxing `fget` (10 to 15 instructions per byte where a `USize` loop is 4 to 6). Each node reads two words as eight single-byte loads with a `Nat` index each (`ldw`: 14 to 42% of the time, about 60 instructions a word where `VbmSimd.ld64` is one load): that is the word-at-a-time remedy the parser took in round two (`wordAt`), not yet taken here because `LeanJson` may not import `VbmSimd`.
+2. **Where else the same cost lives:** the parser's string leaves that are still `Nat` loops (`mbRun`, `plainOff`, `strBytesW`: round three's notes), `escapeString`/`pushString` of the byte printer (same loops, over a `String`'s bytes read in place), the binding readers (a second decoder per language, boundary), and the `numLex`/`scanDig` lexeme check (a second pass over every number, 25% of canada).
+3. **The remedy, in the order of the profile:** (a) the tape printer as a `LeanJsonSimd` module reading words with `VbmSimd.ld64` (the model `ld64Model` is proved in vbm-simd, trust ledger T14, no new trusted C), with the refinement proof to the `Nat` printer that now stands (`printTape_encode` is about the `Nat` version; the pattern is `parseTapeSimd_eq`); (b) `USize` versions of `plainEnd`, `utf8Range`, `scanDig` with their equations (the pattern of `plainOffU_eq`); (c) one pass for a string: validate and find the end of the run together (an ASCII byte is plain or an escape, a lead byte starts the `decodeUtf8A` step), then one copy; (d) vbm-simd's `inset64` for the escape set (`"`, `\`, below 0x20) on 64 bytes at a time. Not done: the throughput above is what the verified `Nat` printer does.
