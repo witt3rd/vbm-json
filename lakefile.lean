@@ -5,7 +5,7 @@ package «vbm-json» where
   leanOptions := #[⟨`warningAsError, true⟩, ⟨`autoImplicit, false⟩]
 
 /-- The reusable verified bit-parallel kernels (the model of the vector operations, the proved kernels, the trusted shim header): a pinned dependency. -/
-require «vbm-simd» from git "https://github.com/witt3rd/vbm-simd" @ "7bafe1efb64ce15e6bf338f8c4a45a802f31d1d9"
+require «vbm-simd» from git "https://github.com/witt3rd/vbm-simd" @ "417271609703360d6699b8e9367c33b11a65f24c"
 
 /-- The library: specification and code, one Lean core. Imports `Init` only (checked by Tier 1): this is what is compiled to C, to WASM and into
 every consumer, so nothing from `Std` or `Lean` may be in its closure (a `Lean.*` import forces full runtime initialisation). The export `vbm_json_parse_tape` is the bit-parallel parser of `LeanJsonSimd`, so the objects of that
@@ -21,7 +21,7 @@ lean_lib LeanJson where
 header (static inline loads, stores and ctz) first in every generated C file. It holds the export `vbm_json_parse_tape` (`parseTapeSimd`). -/
 lean_lib LeanJsonSimd where
   globs := #[.andSubmodules `LeanJsonSimd]
-  moreLeancArgs := #["-fno-builtin-memset", "-include", (__dir__ / ".lake" / "packages" / "vbm-simd" / "include" / "vbm_simd.h").toString]
+  moreLeancArgs := #["-fno-builtin-memset", "-fno-builtin-memcpy", "-fno-builtin-memmove", "-include", (__dir__ / ".lake" / "packages" / "vbm-simd" / "include" / "vbm_simd.h").toString]
 
 /-- The proofs: may import `Std` and `Lean`; NEVER linked (nothing in `LeanJson` may import it, and no executable or export depends on it). -/
 lean_lib LeanJsonProofs where
