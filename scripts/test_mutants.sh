@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The scorecard's mutation metric on the whole shim (split out of test_abi.sh: it was ~230 s of the 299 s Tier 1; docs/decisions/0004-tier1-speed.md). Tier 2 and the schedule run it;
+# The scorecard's mutation metric on the whole shim (split out of test_abi.sh: it was ~230 s of the 299 s Tier 1; docs/decisions/0004-tier1-speed.md). A cold machine runs it on demand;
 # Tier 1 does not (test_abi.sh keeps the eleven hand-written shim mutants). Self-contained: scripts/mutants.py builds its own copies and vectors. Run: mise exec -- scripts/test_mutants.sh
 set -euo pipefail
 cd "$(dirname "$0")/.."

@@ -147,7 +147,7 @@ timeout_seconds = 1800
 warm_change_cmd = 'cd /tmp/w && printf "\n-- warm-run change: a comment\n" >> LeanJsonProofs/Policy.lean'
 warm_command = 'cd /tmp/w && PATH=/tmp/shim:$PATH TEST_JOBS=1 scripts/tier1.sh'
 warm_timeout_seconds = 900
-warm_skips = ["C ABI test", "wasm32 build test", "freestanding native test", "language bindings test", "workflow lint", "protected-set gate", "lander", "commit-on-main guard", "parallel test runner", "delta test selection", "crash-record check", "gate-diff judge", "relabel-attack suite"]
+warm_skips = ["C ABI test", "wasm32 build test", "freestanding native test", "language bindings test", "protected-set gate", "lander", "commit-on-main guard", "parallel test runner", "delta test selection", "crash-record check", "gate-diff judge", "relabel-attack suite"]
 script = "scripts/tier1.sh"
 # the gates of the fast gate and the line of its output that only their negative self-test prints (honesty.gates_self_tested): the scripts/test_*.sh ones print `ok scripts/test_NAME.sh` when the script, which holds the
 # negative self-tests of a gate, passed
@@ -167,7 +167,6 @@ gates = [
   { name = "wasm32 build test", selftest = "^ok +scripts/test_wasm\\.sh" },
   { name = "freestanding native test", selftest = "^ok +scripts/test_native\\.sh" },
   { name = "language bindings test", selftest = "^ok +scripts/test_bindings\\.sh" },
-  { name = "workflow lint", selftest = "^ok +scripts/test_lint_workflows\\.sh" },
   { name = "protected-set gate", selftest = "^ok +scripts/test_protected_set\\.sh" },
   { name = "lander", selftest = "^ok +scripts/test_land_direct\\.sh" },
   { name = "commit-on-main guard", selftest = "^ok +scripts/test_githook\\.sh" },

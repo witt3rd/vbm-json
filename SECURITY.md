@@ -8,7 +8,6 @@ vbm-json is a **pre-release** parser. Nothing is published to a package registry
 - A crash, hang, out-of-bounds access, leak or unbounded memory use on any input, in the C shim (`abi/`), the runtime (`runtime/`), the WASM module or a binding.
 - A disagreement between a binding and the Lean reference.
 - A hole in the proofs: a way to make the ledger (`docs/proof-ledger.md`) claim more than is proved (a forbidden construct that evades the gates, an axiom, a theorem about code the exports do not run).
-- Anything in the CI workflows that would expose a secret or run untrusted code with privileges.
 
 The unverified parts, and what is assumed of them, are listed in `docs/trust-ledger.md`: findings there are expected and welcome.
 

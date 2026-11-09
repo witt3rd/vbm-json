@@ -1,7 +1,7 @@
 # Mutation survivors: the list, the kills and the equivalents
 
 The VBM scorecard (card v5, subject 3d95e74f) reports `construction.mutation_score` 61.3 against a floor of 100. This file is the finding behind that number, one row per surviving mutant. Every number below is
-**LOCAL** (measured on this machine with `scripts/mutants.py`, the runner's own procedure in copies of the tree) unless it says CI; the card's own number is only recomputed by the scorecard.
+**LOCAL** (measured on this machine with `scripts/mutants.py`, the runner's own procedure in copies of the tree); the card's own number is only recomputed by the scorecard.
 
 ## What the metric is (read from the runner, not assumed)
 
@@ -34,7 +34,7 @@ Ids are `file:line:col:old:new` (line 1-based, column 0-based). "Before" is main
 
 **After (LOCAL, `scripts/mutants.py`, same procedure): 32 sites, 28 killed, 3 survived, 1 not viable. Raw 90.3; 100.0 over the non-equivalent mutants (the three survivors are the three equivalents above: one comment and two proved).** 12 survivors in 3 kills-families: 9 killed, 3 equivalent (2 of them proved).
 
-**The scorecard's own runner** (its `run_mutation` driven in its bubblewrap sandbox over this commit's tree, `MemoryMax=8G`; not a CI card): main 3d95e74: **61.3** (19 of 31, the 12 survivors); this branch with the unmodified adapter: **90.3** (28 of 31, the 3 equivalents survive); this branch with the scorecard adapter that reads `mutants-equivalent.txt`): **100.0** (28 killed, 3 equivalent excluded, 0 rejected entries).
+**The scorecard's own runner** (its `run_mutation` driven in its bubblewrap sandbox over this commit's tree, `MemoryMax=8G`; not a card of the scorecard's own run): main 3d95e74: **61.3** (19 of 31, the 12 survivors); this branch with the unmodified adapter: **90.3** (28 of 31, the 3 equivalents survive); this branch with the scorecard adapter that reads `mutants-equivalent.txt`): **100.0** (28 killed, 3 equivalent excluded, 0 rejected entries).
 
 ### The equivalents
 

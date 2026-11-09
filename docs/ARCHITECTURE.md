@@ -10,7 +10,7 @@ vbm-json is one Lean program with one proof, projected onto several languages. N
  │                  from the grammar             └ Ledger.lean: every claim, proved or not
  ├ Parse            the fast parser (explicit        │
  │                  stack, in place)                 ▼
- ├ Print, Tape      printer; the flat tape      Lean kernel ─► leanchecker ─► nanoda   (three checkers)
+ ├ Print, Tape      printer; the flat tape      Lean kernel (the only checker)
  └ Policy, Vectors  limits; test vectors
         │  Lean's C emitter
         ▼
@@ -39,8 +39,7 @@ vbm-json is one Lean program with one proof, projected onto several languages. N
 | axiom gate | the proofs depend only on the standard axioms |
 | obligation ledger | a claim is `proved` only by naming checked theorems; proved may rise, never fall |
 | closure gate | the share of executed code that is specified Lean may only rise; nothing from `Std`, `Lean` or the proofs is reachable from an export |
-| trust ledger | every hand-written file, extern, loader, workflow and tool has an entry |
+| trust ledger | every hand-written file, extern, loader and tool has an entry |
 | vectors and differential tests | the fast parser, the native library, the WebAssembly module and every binding agree with the reference on every vector |
-| Tier 2 | `leanchecker` and the independent `nanoda` re-check every declaration |
 
-The mutation metric (`scripts/test_mutants.sh`, Tier 2) shows the tests can fail. Decisions and their reasons: [`decisions/`](decisions/). What is trusted and why: [`TRUST.md`](TRUST.md).
+The mutation metric (`scripts/test_mutants.sh`, local, not run by Tier 1) shows the tests can fail. Decisions and their reasons: [`decisions/`](decisions/). What is trusted and why: [`TRUST.md`](TRUST.md).

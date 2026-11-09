@@ -3,9 +3,9 @@
 # (verdict, error code, canonical form; the JSONTestSuite files included), builds tests/abi_test.c with the shim and runs it: every row's verdict through vbm_json_parse, an accepted row's
 # tape read back to the canonical bytes, 100000-deep input = VBM_JSON_DEPTH, a failing allocator = VBM_JSON_NOMEM with nothing leaked, no resident growth over 30000 parses.
 # The hosted C (stdio, pthread) is compiled by the Lean toolchain's clang with the system headers: `leanc -isystem /usr/include` (the bundle has none) plus the multiarch directory
-# `/usr/include/<arch>-linux-gnu` where it exists: Debian/Ubuntu (the CI runner) keep `bits/libc-header-start.h` there, Arch keeps it in /usr/include. A PREFLIGHT compiles a probe of the
+# `/usr/include/<arch>-linux-gnu` where it exists: Debian/Ubuntu (a cold machine) keep `bits/libc-header-start.h` there, Arch keeps it in /usr/include. A PREFLIGHT compiles a probe of the
 # headers first and, when it fails, names the package to install (libc6-dev on Debian/Ubuntu, glibc on Arch) instead of a bare "file not found".
-# VBM_JSON_SYSINCLUDE overrides /usr/include (a local rehearsal of the runner's layout). Run: mise exec -- scripts/test_abi.sh
+# VBM_JSON_SYSINCLUDE overrides /usr/include (a local rehearsal of that layout). Run: mise exec -- scripts/test_abi.sh
 set -euo pipefail
 cd "$(dirname "$0")/.."
 . scripts/lib-ran.sh   # ran_case / ran_done / must_fail: the self-tests count what they executed and a refused tool is a failure (docs/decisions/0005-ran-evidence.md)

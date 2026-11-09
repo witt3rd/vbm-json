@@ -121,7 +121,7 @@ def main (args : List String) : IO UInt32 := do
     unless (unionAxioms usedOf env [`Classical.em] {} {}).contains `Classical.choice do
       IO.eprintln "tier1: the axiom gate's shared walk does not find Classical.choice behind Classical.em"; return 1
     let ctx : Core.Context := { fileName := "", fileMap := default }
-    -- the real proof set: every constant with AXIOM_DIFF_FULL=1 (scripts/tier2.sh: about 2 CPU minutes), else every 40th (the oracle is the old quadratic audit); the shared walk's axiom set must equal Lean's, per constant
+    -- the real proof set: every constant with AXIOM_DIFF_FULL=1 (about 2 CPU minutes), else every 40th (the oracle is the old quadratic audit); the shared walk's axiom set must equal Lean's, per constant
     let all := (← IO.getEnv "AXIOM_DIFF_FULL").isSome
     -- the constants checked are the constants of our modules: the module-data enumeration above equals the old filter over every imported constant (the printed count is the same; the
     -- filter scans about 170,000 constants in the interpreter, about 4 CPU s, so it runs with the full differential)
@@ -168,6 +168,6 @@ def main (args : List String) : IO UInt32 := do
       return (msg.isEmpty, msg)
     let (out, ((ok, msg), _)) ← IO.FS.withIsolatedStreams (selfTest.toIO ctx { env })
     unless ok do IO.eprintln s!"tier1: the axiom gate's differential test failed:{msg}"; return 1
-    IO.println s!"axiom gate: differential test ok (the shared walk equals the per-constant audit: axiom sets of {sample.size} of {names.size} real constants{if all then "" else " (a sample; Tier 2 checks all)"} and of planted axioms in every constant kind at depth 0, 1 and 5; four broken walks are caught)"
+    IO.println s!"axiom gate: differential test ok (the shared walk equals the per-constant audit: axiom sets of {sample.size} of {names.size} real constants{if all then "" else " (a sample)"} and of planted axioms in every constant kind at depth 0, 1 and 5; four broken walks are caught)"
     IO.println "axiom gate: negative self-test ok (a constant on a non-standard axiom is rejected)"
   return if bad == 0 then 0 else 1

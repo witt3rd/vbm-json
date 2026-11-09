@@ -8,7 +8,7 @@ A JSON parser (RFC 8259) whose correctness is a machine-checked theorem, written
  Lean specification ──► Lean proofs ──► Lean-generated C ──► native library ──► C, Python, Rust
  (grammar, policies,    (checked by       (the same code,      WebAssembly module   (generated tape
   reference parser,      Lean's kernel     not a rewrite)      (no imports)         readers, no logic)
-  fast parser)           and by nanoda and leanchecker)
+  fast parser)           (no re-checkers: nothing runs after the push)
 ```
 
 ## Why it exists
@@ -95,34 +95,33 @@ A Lean project can use the specification and code directly, with no C in between
 
 ## Build and test
 
-You need [`mise`](https://mise.jdx.dev), `git` and `python3`. `mise install` fetches the pinned Lean release (with the clang and lld it bundles); there is no `elan`. The Tier 2 checks also need `node`, `cargo` and the C library headers (`libc6-dev` on Debian and Ubuntu).
+You need [`mise`](https://mise.jdx.dev), `git` and `python3`. `mise install` fetches the pinned Lean release (with the clang and lld it bundles); there is no `elan`. The WebAssembly and binding tests also need `node`, `cargo` and the C library headers (`libc6-dev` on Debian and Ubuntu); where a tool is absent, that test reports it as skipped, not passed.
 
 ```sh
 mise install
 mise exec -- lake build            # the library and its proofs
 mise exec -- scripts/tier1.sh      # the gate: zero-warning build, all proof gates, vectors, ABI, WebAssembly, bindings
-mise exec -- scripts/tier2.sh      # slow: every proof re-checked by leanchecker and by the independent nanoda
 ```
 
 ## What you can trust, and what you must
 
 | piece | status | what stands behind it |
 |---|---|---|
-| The parser, the grammar, the policies, the fast-equals-reference theorem | **proved** (where the [ledger](docs/proof-ledger.md) says `proved`) | Lean's kernel, re-checked by `leanchecker` and by `nanoda` |
+| The parser, the grammar, the policies, the fast-equals-reference theorem | **proved** (where the [ledger](docs/proof-ledger.md) says `proved`) | Lean's kernel |
 | The printer, the tape encoding, some policy claims | **partly proved**; the open parts are listed | same, plus the shared vectors |
 | The C and WebAssembly code | **generated** from the Lean | Lean's C emitter (trusted, [T01](docs/trust-ledger.md)); a differential test of the native and WebAssembly builds against the reference |
 | The C shim (`abi/vbm_json.c`) and the freestanding runtime (`runtime/rt.c`) | **hand-written, trusted**, about 450 lines in all | the vectors, a mutation test of the shim, a leak and a failing-allocator test |
 | Bindings: tape readers (generated), loaders (hand-written) | trusted, tested | every binding runs all the vectors; each is a second decoder, counted as boundary |
 | The Lean compiler and kernel, the C compiler and linker, the Lean runtime headers | **trusted, not ours** | accepted, with the reasons, in the ledger |
 
-The full list, with what is assumed of each piece, where it enters and how it is tested, is the [trust ledger](docs/trust-ledger.md), explained in [`docs/TRUST.md`](docs/TRUST.md). A hand-written file, an `extern`, a loader, a workflow or a tool with no ledger entry fails the build.
+The full list, with what is assumed of each piece, where it enters and how it is tested, is the [trust ledger](docs/trust-ledger.md), explained in [`docs/TRUST.md`](docs/TRUST.md). A hand-written file, an `extern`, a loader or a tool with no ledger entry fails the build.
 
 ## The honest numbers
 
 Numbers rot when they are copied into prose, so none are kept here. **See the card:** [the scorecard card of this repository](https://github.com/witt3rd/vbm/blob/main/registry/scores/witt3rd__vbm-json.md) lists every metric on one page, measured by the [vbm](https://github.com/witt3rd/vbm) scorecard runner on a pinned commit (throughput against Python's `json`, serde_json and simdjson on six corpora, the verified share of the code, the trusted C, test and mutation evidence, the time of the landing check), with the raw JSON linked from it. The method behind the performance numbers, and the profile of where the time goes, are in [`docs/perf/`](docs/perf/) (`docs/perf/results.md` has the per-corpus tables of each change, each marked with the host and its load). What is proved, partial, open or a stated limit is in [`docs/proof-ledger.md`](docs/proof-ledger.md) (generated); mutation survivors are in [`docs/mutants.md`](docs/mutants.md). Concurrent calls are not yet tested or promised; TypeScript and C# bindings are planned and not in the tree.
 ## How it is developed
 
-The repository is agent-built and lands **directly on `main`**, one commit at a time, through a script that rebases, runs the whole of Tier 1 locally on exactly the result, and pushes a plain fast-forward; CI runs the same gate again on every push. There is no human line-by-line review: the checks are the review. Outside contributions are welcome as pull requests; a maintainer lands them through the same gate. See [`CONTRIBUTING.md`](CONTRIBUTING.md), [`docs/decisions/0002-land-direct.md`](docs/decisions/0002-land-direct.md), [`AGENTS.md`](AGENTS.md), and the standard it is measured against ([`vbm`](https://github.com/witt3rd/vbm)).
+The repository is agent-built and lands **directly on `main`**, one commit at a time, through a script that rebases, runs the whole of Tier 1 locally on exactly the result, and pushes a plain fast-forward. Nothing runs after the push; if `main` is ever red, whoever sees it reverts the offending commit with `git revert` and the author fixes forward. There is no human line-by-line review: the checks are the review. Outside contributions are welcome as pull requests; a maintainer lands them through the same gate. See [`CONTRIBUTING.md`](CONTRIBUTING.md), [`docs/decisions/0002-land-direct.md`](docs/decisions/0002-land-direct.md), [`AGENTS.md`](AGENTS.md), and the standard it is measured against ([`vbm`](https://github.com/witt3rd/vbm)).
 
 More: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) (one page), [`docs/TRUST.md`](docs/TRUST.md), the design record [`docs/decisions/0001-vbm-json.md`](docs/decisions/0001-vbm-json.md).
 

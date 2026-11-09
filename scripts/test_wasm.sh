@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Tier 1 (when `node` is on PATH; Tier 2 REQUIRES it, VBM_JSON_REQUIRE_NODE=1): the freestanding wasm32 build of the fast parser (scripts/build_wasm.sh: the generated C of LeanJson, the unmodified
+# Tier 1 (when `node` is on PATH; VBM_JSON_REQUIRE_NODE=1 makes its absence a failure): the freestanding wasm32 build of the fast parser (scripts/build_wasm.sh: the generated C of LeanJson, the unmodified
 # abi/vbm_json.c, runtime/rt.c; clang --target=wasm32 -nostdlib, no libc, no WASI, no imports) against the Lean reference and the native ABI.
 #   1. Builds the module; generates the shared vectors (vbm-json-vectors-1, JSONTestSuite included) from the REFERENCE; tests/wasm/wasm_test.mjs runs every row through the module (verdict, error code,
 #      the tape read back to the canonical bytes), 100000-deep input = depth error without a trap, the allocator refuses an impossible size, no leak.
@@ -9,8 +9,8 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 . scripts/lib-ran.sh   # ran_case / ran_done / must_fail: the self-tests count what they executed and a refused tool is a failure (docs/decisions/0005-ran-evidence.md)
 if ! command -v node >/dev/null 2>&1; then
-  if [ -n "${VBM_JSON_REQUIRE_NODE:-}" ]; then echo "test_wasm: node is required here (Tier 2) and was not found" >&2; exit 1; fi
-  echo "test_wasm: SKIPPED: node was not found on PATH (Tier 1 skips, Tier 2 requires it: scripts/tier2.sh)"; exit 0
+  if [ -n "${VBM_JSON_REQUIRE_NODE:-}" ]; then echo "test_wasm: node is required here (VBM_JSON_REQUIRE_NODE=1) and was not found" >&2; exit 1; fi
+  echo "test_wasm: SKIPPED: node was not found on PATH (set VBM_JSON_REQUIRE_NODE=1 to require it)"; exit 0
 fi
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 sysinc_flags() { printf '%s\n' -isystem "$1"; [ ! -d "$1/$(uname -m)-linux-gnu" ] || printf '%s\n' -isystem "$1/$(uname -m)-linux-gnu"; }

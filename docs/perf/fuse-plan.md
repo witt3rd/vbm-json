@@ -55,7 +55,7 @@ F0 first: it is pure proof, needs nothing from the parser, and it IS the layout 
 4. **Error words (F4/F5), low.** The partial tape is dropped on error; the proof must show the error branch returns `run`'s error code at the same step (copy of the case analysis).
 5. **Number canonicalisation (F1), low.** `E` to `e` and dropping `+` are the only rewrites; `pushNumLex_eq` is a case split on the same shape as `parseNumA`; the ABI tests (`scripts/test_abi.sh`) already compare the lexeme with the reference's canonical form.
 6. **Performance does not materialise, low-medium.** The estimate (small-objects 46 to ~110-130, canada 51 to ~120-150, scorecard corpus 64 to ~120-140 MB/s, local) is Amdahl on the profile: it assumes the `Value` allocation/free (about 30 to 45% of those documents), the digit lists and the second traversal go away. Measure after F4 on scalar-heavy input (a document of numbers) before investing in F5: if F4's loop is not clearly faster per number than `run` + `encValue`, stop.
-7. **Proof size and the Tier 1 time.** About 1000 to 1400 proof lines add Lean build time to every Tier 1 and Tier 2 run (the kernel re-check in Tier 2 especially); the Tier 1 speed work in flight (test selection) bears on this, and the `leanchecker --fresh` and nanoda budgets should be checked on F5 first.
+7. **Proof size and the Tier 1 time.** About 1000 to 1400 proof lines add Lean build time to every Tier 1 run; the Tier 1 speed work in flight (test selection) bears on this.
 
 ## 6. What the gates see
 

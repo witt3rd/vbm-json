@@ -2,7 +2,7 @@
 
 Phase 1 of the throughput gap: the scorecard measured the subject through the C ABI at 54.8 MB/s against Python's C `json` at 129.4 (sandbox). This is the profile that comes before any change. **Report only: nothing in `LeanJson/` was touched.**
 
-Every number below is **local, on the reference machine** (22 cores, 62 GB, load ~0.4; subject commit `14eabaa`, Lean 4.35.0, `leanc -O2`, the library built as Tier 1 builds it). None is CI. Run under `systemd-run --user --scope -p MemoryMax=8G`, `ulimit -c 0`, with timeouts. Median of 5 windows of 0.6 s unless stated.
+Every number below is **local, on the reference machine** (22 cores, 62 GB, load ~0.4; subject commit `14eabaa`, Lean 4.35.0, `leanc -O2`, the library built as Tier 1 builds it). None is from a hosted run. Run under `systemd-run --user --scope -p MemoryMax=8G`, `ulimit -c 0`, with timeouts. Median of 5 windows of 0.6 s unless stated.
 
 ## Method (reproduce: `docs/perf/run.sh`, on a quiet machine, in a scratch clone)
 

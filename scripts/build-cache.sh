@@ -5,9 +5,8 @@
 #   scripts/build-cache.sh store   [DIR]       after a build: pack .lake/build (modules only, no executables) as DIR/<key>.tar + .sha256, atomically; an existing entry is kept.
 #   scripts/build-cache.sh fetch URL [DIR]     opt-in, needs the network: download URL/<key>.tar and URL/<key>.tar.sha256 into DIR, then restore. A bad checksum is refused and removed.
 # The file list is git's own (byte order): the key does not depend on the caller's locale (a `sort` once made a cache miss in a sandbox that runs with LANG=C).
-# DIR defaults to $VBM_BUILD_CACHE, else ~/.cache/vbm-json/build. This is a CONVENIENCE for a contributor's second and later clones and worktrees; it is never on the path of a gate: scripts/tier1.sh, the lander and CI do not call it,
-# and Lake re-checks every restored module against the hash of its source (a stale or foreign entry is rebuilt, never believed). The checksum detects a damaged or swapped file, not a forged one: Tier 2 rebuilds from source
-# (`leanchecker --fresh`), so what lands never rests on a restored artifact. Run from anywhere inside the repository. Self-test (offline, no Lean needed): scripts/test_build_cache.sh.
+# DIR defaults to $VBM_BUILD_CACHE, else ~/.cache/vbm-json/build. This is a CONVENIENCE for a contributor's second and later clones and worktrees; it is never on the path of a gate: scripts/tier1.sh and the lander do not call it,
+# and Lake re-checks every restored module against the hash of its source (a stale or foreign entry is rebuilt, never believed). The checksum detects a damaged or swapped file, not a forged one: a fresh clone rebuilds from source, so what lands never rests on a restored artifact. Run from anywhere inside the repository. Self-test (offline, no Lean needed): scripts/test_build_cache.sh.
 export LC_ALL=C
 set -euo pipefail
 cd "$(dirname "$0")/.."

@@ -1,7 +1,7 @@
 # The verified structural stage: what landed, and the measured numbers (step 2, slices S0 to S7)
 
 Status: **S0 to S7 of [`simd-plan.md`](simd-plan.md) are in the tree and proved. The export is switched (S8) with the first tuning slice, `runW` (tape written in place; the measurements of [`results.md`](results.md), slice 4). The section "Measured: not a win yet" below is the measurement of `runI` before that.** Every number below is **local**: one shared 16-thread x86-64 machine (AVX2, no AVX-512)
-at load 9 to 17 during the runs, each cell the best of three windows of 0.4 s, repeated runs of one binary differing by up to 15%. **None is CI.** The comparison is within one session.
+at load 9 to 17 during the runs, each cell the best of three windows of 0.4 s, repeated runs of one binary differing by up to 15%. **None is from a hosted run.** The comparison is within one session.
 
 ## What is in the tree
 
@@ -37,5 +37,5 @@ tape words written through `st64` into a preallocated array, a frame stack that 
 
 ## The finding for the standard
 
-`bv_decide` adds one axiom per theorem, which the axiom gate rejects and the independent checkers (`leanchecker`, nanoda) can only take on trust, so it cannot discharge a proof here. The two non-lane-wise kernels were proved instead by an induction over the bit index with an invariant relating the carry to a small machine,
+`bv_decide` adds one axiom per theorem, which the axiom gate rejects and no independent checker can discharge, so it cannot discharge a proof here. The two non-lane-wise kernels were proved instead by an induction over the bit index with an invariant relating the carry to a small machine,
 the step being a `decide` over eight Booleans; the pattern, and the finding, are written up in vbm-simd (`docs/method.md`, `docs/findings/bv-decide.md`) for the standard. The axiom gate was not relaxed.
