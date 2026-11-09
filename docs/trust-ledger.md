@@ -95,7 +95,7 @@ Entry format: **What** it is; **Enters** where it enters; **Assumes** what we as
 - **Test:** none that can fail inside this repository: the lander is the vendored, pinned vbm-land (its own tests live there; .land/tool/bin/land-check verifies the copy is intact).
 - **Owner:** upstream tools; the owner approves the scripts (protected set).
 - **Plan:** accept, because they touch the process and not the artifact: a compromised tool could land a bad change, which the gates and the owner's review of protected paths are there to catch.
-- **Covers:** `tool:git` `tool:gh` `tool:python3` `tool:wt`
+- **Covers:** `tool:git` `tool:python3` `tool:wt`
 
 ## The C ABI (slice 1)
 
