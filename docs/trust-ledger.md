@@ -35,7 +35,7 @@ compiler, runtime and bundled clang/ld.lld (the keys `lean-compiler`, `lean-runt
 - Not covered by the gate (say so rather than pretend): a tool called from a script that is not on the watch-list in `scripts/trust-ledger-check.sh`, and the *quality* of an entry's prose.
   Planned entries (below) are prose until their file exists; nothing stops one from being forgotten except the review of the PR that adds the file.
 
-The count printed on every run and in the Tier 1 log `scripts/land-direct` keeps: `trust ledger: N entries (... gaps)`.
+The count printed on every run and in the Tier 1 log `.land/land-direct` keeps: `trust ledger: N entries (... gaps)`.
 
 Entry format: **What** it is; **Enters** where it enters; **Assumes** what we assume of it (the contract); **Test** the test that can fail; **Owner**; **Plan**.
 
@@ -89,10 +89,10 @@ Entry format: **What** it is; **Enters** where it enters; **Assumes** what we as
 - **Covers:** `tool:mise`
 
 ### T07. git, gh, python3, Worktrunk: the optional process tooling
-- **What:** `git` and `gh` (the red-check and the rebase and push steps of `scripts/land-direct`), `python3` (the trust-ledger checker), `wt` (Worktrunk: worktrees, `scripts/wt`). They run on the developer's machine before the push; none is part of any artifact.
-- **Enters:** `scripts/land-direct`, `scripts/wt`, `scripts/trust_ledger.py`, `scripts/trust-ledger-check.sh`, the Tier 1 scripts.
+- **What:** `git` and `gh` (the red-check and the rebase and push steps of `.land/land-direct`), `python3` (the trust-ledger checker), `wt` (Worktrunk: worktrees, `scripts/wt`). They run on the developer's machine before the push; none is part of any artifact.
+- **Enters:** `.land/land-direct`, `scripts/wt`, `scripts/trust_ledger.py`, `scripts/trust-ledger-check.sh`, the Tier 1 scripts.
 - **Assumes:** they do what their manuals say; the self-tests of the scripts that use them (scratch repos, a `gh` shim) are the check that our use of them is right; no written contract.
-- **Test:** none that can fail inside this repository: the lander is the vendored, pinned vbm-land (its own tests live there; scripts/land/bin/land-check verifies the copy is intact).
+- **Test:** none that can fail inside this repository: the lander is the vendored, pinned vbm-land (its own tests live there; .land/tool/bin/land-check verifies the copy is intact).
 - **Owner:** upstream tools; the owner approves the scripts (protected set).
 - **Plan:** accept, because they touch the process and not the artifact: a compromised tool could land a bad change, which the gates and the owner's review of protected paths are there to catch.
 - **Covers:** `tool:git` `tool:gh` `tool:python3` `tool:wt`

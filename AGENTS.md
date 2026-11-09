@@ -6,10 +6,10 @@ verified by construction is priority 1; efficiency is priority 2. The standard i
 
 ## Landing (direct to main, no PRs)
 - Work in a worktree off a fresh origin/main. Diff ≤150 production lines, ≤45 min without a passing build; over either, stop and write a decomposition plan.
-- Commit locally with Conventional Commits. Land only with `scripts/land-direct`; never push main yourself, never force-push it, never open a PR.
+- Commit locally with Conventional Commits. Land only with `.land/land-direct`; never push main yourself, never force-push it, never open a PR.
 - New behaviour lands behind a flag that defaults OFF. Interface changes: add beside the old, migrate callers, delete at zero references.
 - Everything runs before the push, once (Tier 1 on the rebased tree); nothing runs after it. If main is ever red, whoever sees it reverts the offending commit with `git revert` and lands the revert; the author fixes forward in a new worktree. A landing must not add a failure.
-- `scripts/land/` and `scripts/land-direct` are a pinned copy of vbm-land: never edit them (`scripts/land/bin/land-check` fails the gate). Change the tool upstream, then `scripts/land/bin/land-update <tag>`.
+- `.land/tool/` and `.land/land-direct` are a pinned copy of vbm-land: never edit them (`.land/tool/bin/land-check` fails the gate). Change the tool upstream, then `.land/tool/bin/land-update <tag>`.
 - Decide anything reversible and log it. Escalate only money, data loss, secrets, publishing, or harm to a third party; say so in one line and stop.
 
 ## Principles (the VBM + HVTBD family)
@@ -29,7 +29,7 @@ Scaffold (PR 0) plus the spec layer in three parts: PR 1a `Value`, the RFC 8259 
 - **The specified share and the closure counts are reported on every Tier 1 run** (`scripts/ClosureGate.lean`); the aim is that it only rises and the unverified set only shrinks, and nothing from `Std`, `Lean` or `LeanJsonProofs` is reachable from an export.
 - **The boundary never decides.** C, loaders and bindings move bytes and read the tape; what is valid and what a value is, is decided in Lean only. A second decoder in a binding is counted as boundary and tested, never trusted.
 - **Worktrees only, through `scripts/wt`** (`scripts/wt switch -c agent/<task>`); the primary clone stays on `main` and is never edited.
-- **Land with `scripts/land-direct`, never open a PR** (the owner's decision; `docs/decisions/0002-land-direct.md`): commit locally in your worktree, run it; it rebases the commits in its own scratch copy onto the remote's base, runs Tier 1 on that exact result and pushes a plain fast-forward (no lock: the remote's refusal of a non-fast-forward push is the only arbiter). Never push to `main` yourself, never force-push it. (Outside contributors open PRs; a maintainer lands them: `CONTRIBUTING.md`.)
+- **Land with `.land/land-direct`, never open a PR** (the owner's decision; `docs/decisions/0002-land-direct.md`): commit locally in your worktree, run it; it rebases the commits in its own scratch copy onto the remote's base, runs Tier 1 on that exact result and pushes a plain fast-forward (no lock: the remote's refusal of a non-fast-forward push is the only arbiter). Never push to `main` yourself, never force-push it. (Outside contributors open PRs; a maintainer lands them: `CONTRIBUTING.md`.)
 - **TTL 45 minutes without a passing build:** abort and decompose. **Small diffs.** Conventional Commits `type(scope): summary`.
 - **No secrets in the repository.** No paid model calls from a test or a gate.
 - **Anything in the repository may be edited and landed like any change** (spec, proofs, code, scripts, docs, this file); only the lander files and the signing keys are off limits. Do not weaken a check to make it pass.

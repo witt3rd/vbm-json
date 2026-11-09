@@ -12,7 +12,7 @@ OPS = {"==": "!=", "!=": "==", "<=": "<", ">=": ">", "<": "<=", ">": ">=", "&&":
 TOKEN = re.compile(r"<<=|>>=|\+\+|--|->|<<|>>|\+=|-=|==|!=|<=|>=|&&|\|\||<|>|\+|-")
 CFG = dict(files=["abi/vbm_json.c"], comment="//", mutants=50, seed=1, kill_timeout_seconds=120,
            setup_cmd="lake build LeanJson:static vbm-json-vectors >/dev/null 2>&1 && lake exe vbm-json-vectors --n 4 --out /tmp/v >/dev/null 2>&1",
-           kill_cmd='leanc -isystem /usr/include $(test -d /usr/include/$(uname -m)-linux-gnu && echo -isystem /usr/include/$(uname -m)-linux-gnu) -I include -o /tmp/abi_t tests/abi_test.c abi/vbm_json.c .lake/build/lib/libvbm_x2djson_LeanJson.a >/dev/null 2>&1 || exit 99; /tmp/abi_t /tmp/v/vectors.jsonl >/dev/null 2>&1')  # probe-ok: run() puts it under scripts/land/bin/run-probe
+           kill_cmd='leanc -isystem /usr/include $(test -d /usr/include/$(uname -m)-linux-gnu && echo -isystem /usr/include/$(uname -m)-linux-gnu) -I include -o /tmp/abi_t tests/abi_test.c abi/vbm_json.c .lake/build/lib/libvbm_x2djson_LeanJson.a >/dev/null 2>&1 || exit 99; /tmp/abi_t /tmp/v/vectors.jsonl >/dev/null 2>&1')  # probe-ok: run() puts it under .land/tool/bin/run-probe
 
 
 def sites(root, files, comment):
@@ -62,9 +62,9 @@ def main(argv):
         for s in picked: print(mid(s) + ("  [equivalent]" if mid(s) in eq else ""))
         return 1 if bad else 0
     tmp = tempfile.mkdtemp(prefix="mutants-")
-    # a mutant may crash: every kill command runs under the shared probe helper (scripts/land/bin/run-probe: ulimit -c 0 PLUS the dumpable-clear preload, a private TMPDIR; ulimit alone still writes a crash-journal record), and "/tmp/" in it is this worker's private scratch
+    # a mutant may crash: every kill command runs under the shared probe helper (.land/tool/bin/run-probe: ulimit -c 0 PLUS the dumpable-clear preload, a private TMPDIR; ulimit alone still writes a crash-journal record), and "/tmp/" in it is this worker's private scratch
     def run(w, scratch, cmd, t):
-        try: return subprocess.run(["scripts/land/bin/run-probe", "bash", "-c", cmd.replace("/tmp/", scratch + "/")], cwd=w, timeout=t, capture_output=True).returncode
+        try: return subprocess.run([".land/tool/bin/run-probe", "bash", "-c", cmd.replace("/tmp/", scratch + "/")], cwd=w, timeout=t, capture_output=True).returncode
         except subprocess.TimeoutExpired: return 124
     def worker(j, todo, res):
         w = os.path.join(tmp, f"w{j}"); scratch = os.path.join(tmp, f"s{j}"); os.mkdir(scratch); shutil.copytree(root, w, symlinks=True, ignore=shutil.ignore_patterns(".git"))

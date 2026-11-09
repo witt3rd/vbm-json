@@ -54,11 +54,11 @@ comment = "//"
 # mutants no test can kill, argued (id, reason, expiry) in the subject: only a reasoned, unexpired entry for a SURVIVING mutant is excluded from the score (scorecard/scorecard: equivalents)
 equivalent = "mutants-equivalent.txt"
 # code mutants (the scorecard's operator swaps, seeded) of the ABI shim, killed by the subject's C test harness running the GENERATED vectors through the ABI. setup builds the library and the vectors once;
-# the harness recompiles the mutated shim (exit 99: it does not build, so the mutant is not viable) and runs the vectors (non-zero: killed). The probe binary is built in a private mktemp -d and runs under scripts/land/bin/run-probe (ulimit -c 0 plus the
+# the harness recompiles the mutated shim (exit 99: it does not build, so the mutant is not viable) and runs the vectors (non-zero: killed). The probe binary is built in a private mktemp -d and runs under .land/tool/bin/run-probe (ulimit -c 0 plus the
 # dumpable-clear preload, a private TMPDIR): a crashing mutant leaves no core and no crash record, and no fixed /tmp name; a missing or refusing helper fails the unmutated baseline (not measurable), never a false kill.
 files = ["abi/vbm_json.c"]
 setup_cmd = 'lake build LeanJson:static vbm-json-vectors >/dev/null 2>&1 && lake exe vbm-json-vectors --n 4 --out ./.mutation-vectors >/dev/null 2>&1'
-kill_cmd = 'P=scripts/land/bin/run-probe; [ -x "$P" ] || exit 99; d=$(mktemp -d) && trap "rm -rf $d" EXIT; leanc -isystem /usr/include $(test -d /usr/include/$(uname -m)-linux-gnu && echo -isystem /usr/include/$(uname -m)-linux-gnu) -I include -o $d/abi_t tests/abi_test.c abi/vbm_json.c .lake/build/lib/libvbm_x2djson_LeanJson.a >/dev/null 2>&1 || exit 99; "$P" $d/abi_t ./.mutation-vectors/vectors.jsonl >/dev/null 2>&1'
+kill_cmd = 'P=.land/tool/bin/run-probe; [ -x "$P" ] || exit 99; d=$(mktemp -d) && trap "rm -rf $d" EXIT; leanc -isystem /usr/include $(test -d /usr/include/$(uname -m)-linux-gnu && echo -isystem /usr/include/$(uname -m)-linux-gnu) -I include -o $d/abi_t tests/abi_test.c abi/vbm_json.c .lake/build/lib/libvbm_x2djson_LeanJson.a >/dev/null 2>&1 || exit 99; "$P" $d/abi_t ./.mutation-vectors/vectors.jsonl >/dev/null 2>&1'
 mutants = 50
 seed = 1
 kill_timeout_seconds = 120
