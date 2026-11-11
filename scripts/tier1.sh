@@ -5,6 +5,8 @@
 # Run from the repo root: mise exec -- scripts/tier1.sh.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+# 0. The vendored libraries are exactly their pins (docs/pin.md of vbm-land): the same first step in every repository.
+.land/tool/bin/land-pin verify
 
 lean_sources() { find LeanJson LeanJsonProofs abi -name '*.lean' 2>/dev/null; ls LeanJson.lean LeanJsonProofs.lean 2>/dev/null; }
 # 1. Forbidden constructs in Lean sources; a comment may mention one only on a line marked `-- tier1-allow`.
@@ -24,5 +26,5 @@ export VBM_JSON_VECTORS="$vdir/vectors.jsonl" VBM_OBJ_CACHE="$vdir/obj"
 # Reported, not gated: the specified share and the closure counts.
 lake env lean --run scripts/ClosureGate.lean || true
 # 4. The real tests, in parallel.
-scripts/run-tests-parallel.sh scripts/test_abi.sh scripts/test_wasm.sh scripts/test_native.sh scripts/test_bindings.sh scripts/test_build_cache.sh
+.land/tool/bin/run-tests-parallel scripts/test_abi.sh scripts/test_wasm.sh scripts/test_native.sh scripts/test_bindings.sh scripts/test_build_cache.sh
 echo "tier1: ok"

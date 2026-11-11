@@ -7,7 +7,7 @@
 # Run: mise exec -- scripts/test_wasm.sh
 set -euo pipefail
 cd "$(dirname "$0")/.."
-. scripts/lib-ran.sh   # ran_case / ran_done / must_fail: the self-tests count what they executed and a refused tool is a failure (docs/decisions/0005-ran-evidence.md)
+. .land/tool/lib/ran.sh   # ran_case / ran_done / must_fail: the self-tests count what they executed and a refused tool is a failure (.land/tool/docs/ran-evidence.md)
 if ! command -v node >/dev/null 2>&1; then
   if [ -n "${VBM_JSON_REQUIRE_NODE:-}" ]; then echo "test_wasm: node is required here (VBM_JSON_REQUIRE_NODE=1) and was not found" >&2; exit 1; fi
   echo "test_wasm: SKIPPED: node was not found on PATH (set VBM_JSON_REQUIRE_NODE=1 to require it)"; exit 0

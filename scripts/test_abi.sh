@@ -8,7 +8,7 @@
 # VBM_JSON_SYSINCLUDE overrides /usr/include (a local rehearsal of that layout). Run: mise exec -- scripts/test_abi.sh
 set -euo pipefail
 cd "$(dirname "$0")/.."
-. scripts/lib-ran.sh   # ran_case / ran_done / must_fail: the self-tests count what they executed and a refused tool is a failure (docs/decisions/0005-ran-evidence.md)
+. .land/tool/lib/ran.sh   # ran_case / ran_done / must_fail: the self-tests count what they executed and a refused tool is a failure (.land/tool/docs/ran-evidence.md)
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 sysinc_flags() { printf '%s\n' -isystem "$1"; [ ! -d "$1/$(uname -m)-linux-gnu" ] || printf '%s\n' -isystem "$1/$(uname -m)-linux-gnu"; }
 preflight() {  # preflight SYSINC: the hosted headers the test needs must compile; otherwise say which package provides them

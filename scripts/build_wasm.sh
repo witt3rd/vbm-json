@@ -16,14 +16,14 @@ for f in Value Policy Grammar Reference Print Parse Struct Tape PrintBytes Print
   cc "${cf[@]}" -c ".lake/build/ir/LeanJson/$f.c" -o "$tmp/$f.o"; objs+=("$tmp/$f.o")
 done
 # the bit-parallel parser (the export `vbm_json_parse_tape`): LeanJsonSimd and the pinned dependency VbmSimd, each with the dependency's trusted header (docs/trust-ledger.md T14) included first
-hdr="$here/.lake/packages/vbm-simd/include/vbm_simd.h"; [ -f "$hdr" ] || { echo "build_wasm: $hdr missing" >&2; exit 1; }
+hdr="$here/vendor/vbm-simd/include/vbm_simd.h"; [ -f "$hdr" ] || { echo "build_wasm: $hdr missing" >&2; exit 1; }
 for f in LeanJsonSimd/Stage1 LeanJsonSimd/ParseSimd LeanJsonSimd/PrintSimd; do
   [ -f ".lake/build/ir/$f.c" ] || { echo "build_wasm: .lake/build/ir/$f.c missing: run lake build LeanJson:static first" >&2; exit 1; }
   cc "${cf[@]}" -include "$hdr" -c ".lake/build/ir/$f.c" -o "$tmp/s_$(basename "$f").o"; objs+=("$tmp/s_$(basename "$f").o")
 done
 for f in Spec Lanes Escape PrefixXor Shims Bytes Cursor Find Inset Append Classify; do
-  [ -f ".lake/packages/vbm-simd/.lake/build/ir/VbmSimd/$f.c" ] || { echo "build_wasm: the VbmSimd C of $f is missing" >&2; exit 1; }
-  cc "${cf[@]}" -include "$hdr" -c ".lake/packages/vbm-simd/.lake/build/ir/VbmSimd/$f.c" -o "$tmp/v_$f.o"; objs+=("$tmp/v_$f.o")
+  [ -f "vendor/vbm-simd/.lake/build/ir/VbmSimd/$f.c" ] || { echo "build_wasm: the VbmSimd C of $f is missing" >&2; exit 1; }
+  cc "${cf[@]}" -include "$hdr" -c "vendor/vbm-simd/.lake/build/ir/VbmSimd/$f.c" -o "$tmp/v_$f.o"; objs+=("$tmp/v_$f.o")
 done
 cc "${cf[@]}" -Wall -Wextra -Werror -c abi/vbm_json.c -o "$tmp/abi.o"; objs+=("$tmp/abi.o")
 cc "${cf[@]}" -Wall -Wextra -Werror -c "${VBM_RT_C:-runtime/rt.c}" -o "$tmp/rt.o"; objs+=("$tmp/rt.o")

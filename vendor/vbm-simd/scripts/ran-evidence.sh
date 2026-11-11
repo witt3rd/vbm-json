@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The reader of ran-evidence (scripts/lib-ran.sh; docs/decisions/0005-ran-evidence.md). The line format is exactly
+# The reader of ran-evidence (scripts/lib-ran.sh; docs/decisions/0002-ran-evidence.md). The line format is exactly
 #     ran: NAME: N cases              NAME = [A-Za-z0-9_.-]+, N = a positive integer
 #   scripts/ran-evidence.sh check NAME LOGFILE   exit 0 only when LOGFILE has at least one ran line and the sum of its N is > 0 and it holds no SKIPPED line (VBM_ALLOW_SKIP=1 lets a
 #                                                 SKIPPED line through with a loud note: a box without an optional tool; the ran line is still required of the rest of the script).
@@ -17,7 +17,7 @@ case "${1:-}" in
   check)
     name=${2:?name}; log=${3:?log}; [ -f "$log" ] || bad "$name: no log"
     skipped=0; if grep -qE '(^|[^A-Za-z])SKIPPED' "$log"; then skipped=1
-      [ "${VBM_ALLOW_SKIP:-0}" = 1 ] || bad "$name: it reports SKIPPED: a skipped check is a failure, never a pass (VBM_ALLOW_SKIP=1 only on a box that lacks an optional tool)"
+      [ "${VBM_ALLOW_SKIP:-0}" = 1 ] || bad "$name: it reports SKIPPED: a skipped check is a failure, never a pass (VBM_ALLOW_SKIP=1 only on a box that lacks an optional tool; the gate requires every tool)"
       echo "ran-evidence: $name: SKIPPED part allowed by VBM_ALLOW_SKIP=1 (NOT RUN)" >&2
     fi
     total=0; seen=0

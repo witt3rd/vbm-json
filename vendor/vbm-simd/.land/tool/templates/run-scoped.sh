@@ -3,12 +3,12 @@
 # RuntimeMaxSec=MAXSEC, so an aborted run (the caller killed, a SIGKILL included, a terminal gone) cannot leave the runner or its children orphaned:
 # the scope is stopped on exit, on a signal and, if even this wrapper dies, by RuntimeMaxSec. Exit status = the command's (124 on the bound).
 # Standing rule: nobody kills by a derived pid or a pattern; this helper stops only its own scope, by the unit name it chose.
-# Without a usable systemd user manager (a container) it falls back to setsid + timeout --kill-after with a trap that stops its own group: the same three guarantees (bound, abort, reaped on exit).
+# Without a usable systemd user manager (hosted CI) it falls back to setsid + timeout --kill-after with a trap that stops its own group: the same three guarantees (bound, abort, reaped on exit).
 # scripts/lint-scoped-runners.sh (Tier 1) fails any script that runs a listed runner without going through here.
 set -uo pipefail
 # The heavy-host guard (docs/no-build-host.md): on a host with a no-build marker nothing starts (exit 2). It runs first, and again in the scoped side (--exec-argfile) just before the command is exec'd. Missing guard = refused.
 d=$(dirname "$(readlink -f "$0")"); nbg=
-for c in "$d/land/bin/no-build-guard" "$d/../bin/no-build-guard"; do [ -x "$c" ] && { nbg=$c; break; }; done
+for c in "$d/../.land/tool/bin/no-build-guard" "$d/../bin/no-build-guard"; do [ -x "$c" ] && { nbg=$c; break; }; done
 [ -n "$nbg" ] || { echo "run-scoped: REFUSED: no-build-guard is not installed next to this helper" >&2; exit 2; }
 "$nbg" || exit 2
 # internal: the scoped side. The arguments travel in a NUL-delimited file, because systemd-run's treatment of $ in its own arguments differs between versions.
@@ -22,7 +22,7 @@ command -v systemd-run >/dev/null 2>&1 || usable=0
 systemctl --user is-system-running >/dev/null 2>&1 || [ "$(systemctl --user is-system-running 2>/dev/null)" = degraded ] || usable=0
 [ -z "${RUN_SCOPED_NO_SYSTEMD:-}" ] || usable=0   # test hook: force the fallback
 if [ $usable = 0 ]; then
-  # Fallback (no systemd user manager: containers): the same guarantees by process group. The command runs in its own session (setsid: pgid = the pid held here), under
+  # Fallback (no systemd user manager: hosted CI, containers): the same guarantees by process group. The command runs in its own session (setsid: pgid = the pid held here), under
   # timeout --kill-after for the bound, and a trap stops that group on exit or a signal. Nothing is signalled by pattern or by a derived pid.
   trap 'kill -TERM -- "-${gpid:-0}" 2>/dev/null || true' EXIT
   trap 'kill -TERM -- "-${gpid:-0}" 2>/dev/null || true; exit 143' INT TERM HUP

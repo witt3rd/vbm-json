@@ -3,7 +3,7 @@
 # a stored entry restores byte for byte into another clone (executables excluded); each way of getting a WRONG artifact in is shown refused: a damaged or swapped tarball, a missing checksum, a key that moved, a plain-http fetch.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-. scripts/lib-ran.sh   # ran_case counts each executed check; ran_done prints the evidence line (docs/decisions/0005-ran-evidence.md)
+. .land/tool/lib/ran.sh   # ran_case counts each executed check; ran_done prints the evidence line (.land/tool/docs/ran-evidence.md)
 src=$(pwd); T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
 fail() { echo "test_build_cache: $*" >&2; exit 1; }
 mkdir -p "$T/bin"; printf '#!/bin/sh\necho "Lean (version ${LEAN_STUB:-4.35.0}, x86_64-unknown-linux-gnu)"\n' > "$T/bin/lean"; chmod +x "$T/bin/lean"; export PATH="$T/bin:$PATH"
