@@ -17,6 +17,7 @@ Same grammar as `land.conf` and the same parser (`lib/conf.sh`): `LAND_KEY=value
 | `LAND_LEAN_LEDGER_BRIDGES` | a file of refinement bridges, `spec-def theorem reached-def` per line (optional, with the entries) |
 | `LAND_LEAN_LEDGER_BASELINE` | a ratchet baseline file: turns the RATCHET on (`land-lean ledger --write` records it) |
 | `LAND_LEAN_LEDGER_CLAUSES` | a clause index, one tag per line (the first word): turns the CLAUSE check on |
+| `LAND_LEAN_LEDGER_TAGGED` | `1` requires every proved or partial claim to cite a clause (a library whose claims are all about a standard sets it; one with library-level claims of its own leaves it `0`, the default) |
 | `LAND_LEAN_LEDGER_COVERAGE` | the dispositions (the second word of an index line) whose clauses a proved or partial claim must tag, reported as coverage |
 | `LAND_LEAN_RECHECK_MODULES` | the modules whose proofs the checker replays, space separated (each replays its whole import closure: usually the top module of each library) |
 | `LAND_LEAN_TRUST_FILES` | path patterns of the trusted files beyond the build pins (C files, binding loaders, CI workflows), e.g. `native/*.c` |
@@ -44,7 +45,7 @@ Exit codes: 0 ok, 1 the gate failed, 2 usage or a refused configuration.
 
 The obligation ledger: every claim a library makes, keyed by a slug, each `proved` (naming theorems), `partly`, `open_` or `limit` (no machine decides it). The tool ships the vocabulary (`lean/LandLedger.lean`: `Status`, `Obligation`, `O`, `OC` for a claim with clause tags, `.withCaveat`) and the gate (`lean/LedgerGate.lean`, over `lean/LandWalk.lean`, the reach walk); a repository holds only its data. To adopt it:
 
-1. Add the tool's modules to the build (the one build picks them up with everything else): in `lakefile.lean`, `lean_lib LandLedger where srcDir := ".land/tool/lean"; roots := #[`LandLedger, `LandWalk]`; in `lakefile.toml`, a `[[lean_lib]]` with `name = "LandLedger"`, `srcDir = ".land/tool/lean"`, `roots = ["LandLedger", "LandWalk"]`.
+1. Require the tool's package (it is a small Lake package, `lean/lakefile.toml`, shipped in the vendored tool): in `lakefile.lean`, `require «land-ledger» from ".land/tool/lean"`; in `lakefile.toml`, a `[[require]]` with `name = "land-ledger"` and `path = ".land/tool/lean"`. Do not declare a library of your own for it: Lake resolves a package by name, so a repository and the libraries it vendors that all require `land-ledger` share ONE copy (the repository's), where two libraries providing a module named `LandLedger` would make `import LandLedger` ambiguous (Lake refuses to guess). `land-check` ignores the `.lake` build directory the package builds in place.
 2. Write the ledger in a module that does `import LandLedger` and `open Land.Ledger`, ending in `def ledger : List Obligation := [ O "slug" (.proved [``Some.theorem]), ... ]` (double-backtick names are checked at elaboration: a renamed theorem breaks the file).
 3. List the module in `.land/lean.conf` (`LAND_LEAN_LEDGER_MODULE`), then the options the repository wants.
 
@@ -52,7 +53,7 @@ The gate renders `docs/proof-ledger.md` and fails if a named theorem does not ex
 
 * **Reach** (an entries file): "proved" means proved about code the entry points run. The gate walks every definition they reach and classes each cited theorem by the subject's functions its statement mentions: yes (all reached), partly, no (none: the statement is about a model nothing runs). A claim whose theorems are all `no` is shown as partial ("demoted"), never proved. A bridge (`spec-def theorem reached-def`) counts a definition as reached when a refinement theorem names it and a reached one. The walk skips only the closed set of kinds in `LandWalk.auxKind`: a name-based filter would let a definition leave the count by being renamed.
 * **Ratchet** (a baseline): proved may only rise; open may rise only by the claims newly written down. `--write` records the baseline and keeps its comment lines.
-* **Clauses** (an index): every tag a claim cites must be in the index, and a proved or partial claim must cite one. With coverage dispositions, the clauses that no proved or partial claim tags are listed: traceability from clause to theorem, never fidelity of the statement.
+* **Clauses** (an index): every tag a claim cites must be in the index, and with `LAND_LEAN_LEDGER_TAGGED=1` a proved or partial claim must cite one. With coverage dispositions, the clauses that no proved or partial claim tags are listed: traceability from clause to theorem, never fidelity of the statement.
 
 `--selftest` proves the gate can fail, in the same process: a non-theorem, a missing theorem, a falling baseline, a rising open count, an unknown tag and an untagged proved claim are each rejected (the last four only when their option is on). ClosureGate (the specified-share floor) stays each repository's own policy; the walk it needs is `LandWalk`.
 
