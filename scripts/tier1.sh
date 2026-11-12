@@ -20,6 +20,7 @@ lake build LeanJson LeanJsonProofs vbm-json-vectors LeanJson:static LeanJsonSimd
 # 2a. Only the standard axioms. 2d. A new trusted boundary has a trust-ledger entry. 2e. The shared vectors agree with the Lean reference.
 .land/tool/bin/land-lean axiom
 .land/tool/bin/land-lean trust
+.land/tool/bin/land-lean recheck --selftest   # every proof replayed by Lean's own checker in a fresh process (vbm-land docs/lean-gates.md)
 vdir=$(mktemp -d); trap 'rm -rf "$vdir"' EXIT   # generating runs every check of --check (reference consistency, fast parser, fused tape parser, JSONTestSuite) and writes the rows the tests below share
 lake exe vbm-json-vectors --n 4 --out "$vdir"
 export VBM_JSON_VECTORS="$vdir/vectors.jsonl" VBM_OBJ_CACHE="$vdir/obj"
