@@ -18,7 +18,7 @@ if [ -n "$bad" ]; then echo "tier1: LeanJson may import only LeanJson modules:" 
 # 2. Build (warningAsError is set in lakefile.lean), once, for the guards and every test.
 lake build LeanJson LeanJsonProofs vbm-json-vectors LeanJson:static LeanJsonSimd VbmSimd VbmSimdProofs
 # 2a. Only the standard axioms. 2d. A new trusted boundary has a trust-ledger entry. 2e. The shared vectors agree with the Lean reference.
-lake env lean --run scripts/AxiomGate.lean
+.land/tool/bin/land-lean axiom
 scripts/trust-ledger-check.sh
 vdir=$(mktemp -d); trap 'rm -rf "$vdir"' EXIT   # generating runs every check of --check (reference consistency, fast parser, fused tape parser, JSONTestSuite) and writes the rows the tests below share
 lake exe vbm-json-vectors --n 4 --out "$vdir"

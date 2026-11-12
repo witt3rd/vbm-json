@@ -1,10 +1,8 @@
 import Lean
-import LeanJson
-import LeanJsonProofs
-import LeanJsonSimd.ParseSimd
-/-! Axiom gate (Tier 1 here: the library is small, so it is cheap): every constant defined in a `LeanJson`, `LeanJsonProofs`, `LeanJsonSimd`, `VbmSimd` (the pinned dependency) or `VbmSimdProofs` module may depend only
-on the three standard axioms. Exits non-zero (and names the offenders) otherwise. `--selftest` also proves the gate can fail: a
-synthetic constant that declares a non-standard axiom is added to the environment, and the audit must reject it. -/
+/-! The axiom gate of vbm-land (docs/lean-gates.md; run it with `land-lean axiom`): every constant defined in a module of the audited ROOTS may depend only on the three standard axioms
+(`propext`, `Classical.choice`, `Quot.sound`). Exits non-zero (and names the offenders) otherwise. The modules to import and the roots to audit are arguments, read by `land-lean` from the repository's
+`.land/lean.conf` (the tool's one parser): `--imports A,B.C --roots X,Y`. A root that matches no constant is an error: a gate that audited nothing proves nothing.
+`--selftest` also runs the differential test: the shared walk below must agree with Lean's own `collectAxioms` on real constants and on planted axioms of every kind, and it must catch deliberately broken walks. -/
 open Lean
 
 def allowed : List Name := [`propext, `Classical.choice, `Quot.sound]
@@ -105,15 +103,29 @@ def plant : CoreM (Array Name × Array Name) := do
     tops := tops.push prev
   return (tops, #[`Quot, `Quot.mk, `Quot.lift, `Quot.ind, `Nat.add_comm, `Classical.em, `propext, `Classical.choice, `Quot.sound])
 
-def ours (r : Name) : Bool := r == `LeanJson || r == `LeanJsonProofs || r == `LeanJsonSimd || r == `VbmSimd || r == `VbmSimdProofs
+/-- A module's root is one of the audited roots. -/
+def ours (roots : List Name) (r : Name) : Bool := roots.contains r
+
+/-- The comma-separated value of `--key`, or none. -/
+def listArg (args : List String) (key : String) : List String :=
+  match args.dropWhile (· != key) with
+  | _ :: v :: _ => (v.splitOn ",").filter (· != "")
+  | _ => []
+
+/-- A dotted module name. -/
+def modName (s : String) : Name := (s.splitOn ".").foldl Name.mkStr Name.anonymous
 
 def main (args : List String) : IO UInt32 := do
   initSearchPath (← findSysroot)
-  let env ← importModules #[{ module := `LeanJson }, { module := `LeanJsonProofs }, { module := `LeanJsonSimd.ParseSimd }] {}
+  let imports := (listArg args "--imports").map modName
+  let roots := (listArg args "--roots").map modName
+  if imports.isEmpty || roots.isEmpty then IO.eprintln "axiom gate: --imports and --roots are required (land-lean reads them from .land/lean.conf)"; return 2
+  let env ← importModules (imports.toArray.map fun m => { module := m }) {}
   -- the constants of our modules, read from those modules' own data (not by filtering every imported constant)
   let mut names : Array Name := #[]
   for h : i in [0:env.header.moduleNames.size] do
-    if ours env.header.moduleNames[i].getRoot then names := names ++ env.header.moduleData[i]!.constNames
+    if ours roots env.header.moduleNames[i].getRoot then names := names ++ env.header.moduleData[i]!.constNames
+  if names.isEmpty then IO.eprintln s!"axiom gate: no constants in the roots {roots}: a gate that audited nothing proves nothing (check .land/lean.conf)"; return 1
   let ((count, bad), _) ← (check names).toIO { fileName := "", fileMap := default } { env }
   IO.println s!"axiom gate: {count} constants checked, {bad} offending"
   if args.contains "--selftest" then
@@ -129,7 +141,7 @@ def main (args : List String) : IO UInt32 := do
       let mut oldNames : NameSet := {}
       for (n, _) in env.constants.map₁.toList do
         let some idx := env.getModuleIdxFor? n | continue
-        if ours (env.header.moduleNames[idx.toNat]!).getRoot then oldNames := oldNames.insert n
+        if ours roots (env.header.moduleNames[idx.toNat]!).getRoot then oldNames := oldNames.insert n
       -- a module's data can hold a name another module's data holds too (the equation lemma `foo.eq_1`, generated in each module that unfolds `foo`): the oracle is a set, so compare the distinct names
       let distinct : NameSet := names.foldl (fun s n => s.insert n) {}
       unless oldNames.toList.length == distinct.toList.length && names.all oldNames.contains do

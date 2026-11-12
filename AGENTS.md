@@ -42,7 +42,7 @@ Scaffold (PR 0) plus the spec layer in three parts: PR 1a `Value`, the RFC 8259 
 - **The trust ledger** (`docs/trust-ledger.md`) lists everything outside our control; a new boundary (extern, C file, loader, tool) with no entry fails Tier 1. Entries for pieces not in the tree yet are written under "Planned" and promoted in the PR that adds the file.
 
 ## Gates (Tier 1, before landing)
-- **Tier 1** (`scripts/tier1.sh`, about 20 s for a one-module change, about 11 minutes from a cold build (`docs/decisions/0004-tier1-speed.md`, local)): the forbidden-constructs scan, the Init-only import scan, a zero-warning build of both libraries, the axiom gate (`scripts/AxiomGate.lean`), the trust ledger (`scripts/trust-ledger-check.sh`; a new boundary needs an entry), the shared vectors, and the real tests (ABI, WebAssembly, native, bindings, the build cache). The specified share and closure counts are printed, never gated. Nothing else refuses a landing.
+- **Tier 1** (`scripts/tier1.sh`, about 20 s for a one-module change, about 11 minutes from a cold build (`docs/decisions/0004-tier1-speed.md`, local)): the forbidden-constructs scan, the Init-only import scan, a zero-warning build of both libraries, the axiom gate (`.land/tool/bin/land-lean axiom`), the trust ledger (`scripts/trust-ledger-check.sh`; a new boundary needs an entry), the shared vectors, and the real tests (ABI, WebAssembly, native, bindings, the build cache). The specified share and closure counts are printed, never gated. Nothing else refuses a landing.
 - **Nothing runs after the push.** If main is ever red, whoever sees it reverts the offending commit with `git revert` and lands the revert; the author fixes forward in a new worktree.
 
 ## Layout
