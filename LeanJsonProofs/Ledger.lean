@@ -8,26 +8,17 @@ import LeanJsonProofs.Fast
 import LeanJsonProofs.FastLoop
 import LeanJsonProofs.Stage1
 import LeanJsonProofs.ParseC
+import LandLedger
 /-! # The obligation ledger
 
 Every claim the library makes, keyed by a slug. A claim is `proved` only by naming theorems (double-backtick names are checked at
 elaboration, so a renamed or deleted theorem breaks this file), `partly` when theorems cover only a part (the note says which part is open),
 `open_` when nothing is proved, or `limit` when no machine decides it (the note says who carries it).
-`scripts/LedgerGate.lean` renders `docs/proof-ledger.md` from this list and ratchets it: proved may only rise, open may only fall. A report
+`land-lean ledger` renders `docs/proof-ledger.md` from this list and ratchets it: proved may only rise, open may only fall. A report
 may not call anything verified that is not `proved`. The claims are the plan's (docs/decisions/0001-vbm-json.md); at scaffolding
 every one is open. -/
 
-inductive Status where
-  | proved (thms : List Lean.Name)
-  | partly (thms : List Lean.Name) (open_ : String)
-  | open_ (note : String)
-  | limit (carriedBy : String)
-
-structure Obligation where
-  slug   : String
-  status : Status
-
-def O (slug : String) (s : Status) : Obligation := ⟨slug, s⟩
+open Land.Ledger
 
 def ledger : List Obligation := [
   -- the grammar and the reference

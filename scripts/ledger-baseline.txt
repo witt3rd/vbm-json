@@ -1,3 +1,4 @@
-proved 7
+# Re-based 2026-11-12 (proved 7 to 6): `print-bytes-equal-reference-printer` is about `printBytes`, which the export no longer runs (it prints with `printTape`), so the reach rule demotes it to partial. The ledger gate had no caller in Tier 1, so the fall went unseen; the old gate and the shared one agree on this tree.
+proved 6
 open 1
 total 22
