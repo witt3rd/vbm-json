@@ -2,7 +2,7 @@
 
 One file listing **everything outside our direct control that vbm-json executes or depends on**: code we did not prove, code we did not write, and facilities we
 assume. It exists because verified by construction is the first priority of the project: the size of the unverified base and the handling of
-its boundary is the most critical measure. A boundary with no entry here does not land (`scripts/trust-ledger-check.sh`, Tier 1). The pattern is borrowed from the project the gates were first built in (`docs/trust-ledger.md`
+its boundary is the most critical measure. A boundary with no entry here does not land (`.land/tool/lean/trust-keys.sh`, Tier 1). The pattern is borrowed from the project the gates were first built in (`docs/trust-ledger.md`
 there); only the derivation of the required set differs.
 
 **Snapshot at the commit that added this file:** skeleton, no library code. The closure of the exports is empty (`scripts/closure-entries.txt` has no entry points): specified
@@ -32,7 +32,7 @@ compiler, runtime and bundled clang/ld.lld (the keys `lean-compiler`, `lean-runt
 - A `Covers` key that names nothing real fails (a stale or invented cover), and **removing any entry fails** (the gate does this to itself on every run, one entry at a time: an entry that
   covers nothing required is padding). Dangling file references fail. An entry needs all seven fields, a **Plan** from `verify | replace | sandbox | accept`, and `accept` needs
   `because ...`. **Assumes** must link a written contract or say `no written contract` (counted as a gap); **Test** must name a test that can fail or say `none` (counted as a gap).
-- Not covered by the gate (say so rather than pretend): a tool called from a script that is not on the watch-list in `scripts/trust-ledger-check.sh`, and the *quality* of an entry's prose.
+- Not covered by the gate (say so rather than pretend): a tool called from a script that is not on the watch-list in `.land/tool/lean/trust-keys.sh`, and the *quality* of an entry's prose.
   Planned entries (below) are prose until their file exists; nothing stops one from being forgotten except the review of the PR that adds the file.
 
 The count printed on every run and in the Tier 1 log `.land/land-direct` keeps: `trust ledger: N entries (... gaps)`.
@@ -90,7 +90,7 @@ Entry format: **What** it is; **Enters** where it enters; **Assumes** what we as
 
 ### T07. git, gh, python3, Worktrunk: the optional process tooling
 - **What:** `git` and `gh` (the red-check and the rebase and push steps of `.land/land-direct`), `python3` (the trust-ledger checker), `wt` (Worktrunk: worktrees, `scripts/wt`). They run on the developer's machine before the push; none is part of any artifact.
-- **Enters:** `.land/land-direct`, `scripts/wt`, `scripts/trust_ledger.py`, `scripts/trust-ledger-check.sh`, the Tier 1 scripts.
+- **Enters:** `.land/land-direct`, `scripts/wt`, `.land/tool/lean/trust_ledger.py`, `.land/tool/lean/trust-keys.sh`, the Tier 1 scripts.
 - **Assumes:** they do what their manuals say; the self-tests of the scripts that use them (scratch repos, a `gh` shim) are the check that our use of them is right; no written contract.
 - **Test:** none that can fail inside this repository: the lander is the vendored, pinned vbm-land (its own tests live there; .land/tool/bin/land-check verifies the copy is intact).
 - **Owner:** upstream tools; the owner approves the scripts (protected set).
@@ -170,12 +170,12 @@ Entry format: **What** it is; **Enters** where it enters; **Assumes** what we as
 - **Test:** `scripts/tier1.sh` (the pin in `lakefile.lean`, the manifest and the checkout agree and the header is unedited; five negative self-tests) and `scripts/tier1.sh` (only `LeanJsonSimd/` imports the dependency, and never its proofs); the shims' differential test and mutants run in vbm-simd's own Tier 1; the shared vectors of this repository run through the shims on every Tier 1 (the export is the bit-parallel parser; on an AVX2 machine, which Tier 1 is, and on aarch64, `stage1Fast` takes the classifier, and the differential `vbm-json-vectors --check --corpus` compares the export with the reference on every row and on six corpora).
 - **Owner:** the owner (`lakefile.lean` and `lake-manifest.json` are in the protected set); vbm-simd is the same owner's repository.
 - **Plan:** verify, in part: the Lean side is proved against its models; the header is the small, exhaustively-exercised part that stays trusted. The pin changes only through the protected path, one reviewed commit at a time.
-- **Covers:** `file:lake-manifest.json` `dep:vbm-simd/include/vbm_simd.h` `extern:vbm_simd_ld64` `extern:vbm_simd_st64` `extern:vbm_simd_st32` `extern:vbm_simd_ctz` `extern:vbm_simd_find_neon` `extern:vbm_simd_has_neon` `extern:vbm_simd_inset64` `extern:vbm_simd_has_avx2` `extern:vbm_simd_find_avx2` `extern:vbm_simd_append` `extern:vbm_simd_classify64` `module:VbmSimd.Shims` `module:VbmSimd.Find` `module:VbmSimd.Append` `module:VbmSimd.Classify`
+- **Covers:** `pin:vbm-simd` `dep:vbm-simd/include/vbm_simd.h` `extern:vbm_simd_ld64` `extern:vbm_simd_st64` `extern:vbm_simd_st32` `extern:vbm_simd_ctz` `extern:vbm_simd_find_neon` `extern:vbm_simd_has_neon` `extern:vbm_simd_inset64` `extern:vbm_simd_has_avx2` `extern:vbm_simd_find_avx2` `extern:vbm_simd_append` `extern:vbm_simd_classify64` `module:VbmSimd.Shims` `module:VbmSimd.Find` `module:VbmSimd.Append` `module:VbmSimd.Classify`
 
 ## Planned (not in the tree yet; promoted to a numbered entry, with a derived key, in the PR that adds the file)
 
 These are written down now so the trust base is known before the code exists. They are **not gated** until their file lands; the PR that adds the file must add the
-entry (the derivation in `scripts/trust-ledger-check.sh` then requires it).
+entry (the derivation in `.land/tool/lean/trust-keys.sh` then requires it).
 
 - **P1. (landed as T10, `runtime/rt.c`, with the WASM build.)** Was: `runtime/runtime.c`, the allocator shim (~200 lines of C). Freestanding (WASM: no imports, linked without `--allow-undefined`). A minimal bump arena is too small: JSON needs array and string growth, so expect a ~200-line allocator. New trusted C, unverified. Plan: sandbox then verify the smallest part; tested by mutants (each must fail the vectors) and the allocation ratchet. Will cover `file:runtime/runtime.c`.
 - **P2. The rest of the ABI (`abi/`).** Slice 1 landed `vbm_json_parse`, `vbm_json_free` and the tape (T09). `vbm_json_print_tape`, `vbm_json_escape_string` and `vbm_json_bytes_free` have landed (T09). Still to come: `vbm_json_validate`, `_canonicalize` over caller-owned buffers with a "needed size" return, `abi.json` described in Lean, and the proved tape encode/decode (the packing is proved in Lean; the C edge that reads and writes the caller's memory stays trusted). Contract: `abi.json` and `docs/abi.md` (to write). Test: the shared vectors; mutants of the C edge.
