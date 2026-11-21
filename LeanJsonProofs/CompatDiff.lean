@@ -3,7 +3,7 @@ import LeanJson.Compat.Print
 /-! # `LeanJsonProofs.CompatDiff`: the printing half of the differential suite, `LeanJson.Compat` against the toolchain's `Lean.Json`
 
 A corpus of at least 500 values (hand-written edge cases, then values from a seeded generator whose seed is data: `seed`) and, for each, `Json.compress` and `Json.pretty` (default width and two narrow ones)
-are byte-equal to the toolchain's. The check is a `#guard` (evaluated when this file is built, so a difference fails the build; it adds no axiom). Edge cases: numbers `1.0`, `1e3`, `-0`, long mantissas,
+are byte-equal to the toolchain's. The check is a `#guard` (evaluated when this file is built, so a difference fails the build). Edge cases: numbers `1.0`, `1e3`, `-0`, long mantissas,
 exponent signs and long zero runs, string escapes (controls, `\u` of non-BMP characters, the solidus, DEL, U+0000, U+FFFF), key order and nesting. A negative self-test shows the check can fail. The parsing half is the next slice.
 Not a theorem: byte equality with the toolchain is a differential run on this corpus. -/
 namespace LeanJsonProofs.CompatDiff
