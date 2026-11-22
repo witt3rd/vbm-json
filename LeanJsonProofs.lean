@@ -19,4 +19,5 @@ import LeanJsonProofs.FastLoop
 import LeanJsonProofs.Ledger
 import LeanJsonProofs.ShimHeader
 import LeanJsonProofs.CompatDiff
+import LeanJsonProofs.CompatRound
 /-! # vbm-json proofs: the umbrella. May import `Std` and `Lean`; never linked. -/

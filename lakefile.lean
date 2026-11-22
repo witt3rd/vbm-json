@@ -33,3 +33,8 @@ lean_lib LeanJsonProofs where
 lean_exe «vbm-json-vectors» where
   srcDir := "vectors"
   root := `Main
+
+/-- The size probe of `LeanJson.Compat` (`tests/compat/CompatSize.lean`): imports only `LeanJson.Compat`; its stripped size is recorded in `docs/trust-ledger.md`. Not part of any export. -/
+lean_exe «compat-size» where
+  srcDir := "tests/compat"
+  root := `CompatSize

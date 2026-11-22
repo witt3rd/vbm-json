@@ -22,6 +22,8 @@ differential and the shared vectors, not by proof.
 `LeanJson.parseTape` (the export `vbm_json_parse_tape`); the specified share is 18916/18916 (100%): `LeanJson/Tape.lean` lives in the specification module but has **no proof yet** (the layout theorem is slice 2), so for that code the
 share says where it lives and the test says whether it is right. The tool `leanc` joins the watch-list (covered by T04).
 
+**Snapshot at `LeanJson.Compat` slice d1 (size):** no new boundary. The executable `compat-size` (`tests/compat/CompatSize.lean`; not part of any export) imports only `LeanJson.Compat` and prints a small object through `mkObj`, `compress` and `parse`. Its size, stripped (`strip`), is **2,856,440 bytes**; an `Init`-only program that prints one line, built the same way (`lean -c`, `leanc`, `strip`), is **2,804,600 bytes**: the difference is 51,840 bytes, far inside the 1 MB bound. (The same program over the toolchain's `Lean.Data.Json` is about 75 MB.) Measured once, by hand; Tier 1 builds the executable but does not compare sizes.
+
 ## How the gate keeps this file true
 
 The set of things that must appear here is **derived from the tree, not from this file**: every `@[extern]` symbol in `LeanJson/` and `abi/`, every file under `runtime/*.c`,
