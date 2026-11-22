@@ -1,6 +1,6 @@
 import LeanJson.Compat
 set_option linter.unusedSimpArgs false
-/-! # `LeanJsonProofs.CompatRound`: the object-key theorems and the injectivity of `compress` of `LeanJson.Compat` (slices d1 and d2 of 3)
+/-! # `LeanJsonProofs.CompatRound`: the object-key theorems and the injectivity of `compress` of `LeanJson.Compat` (slices d1 to d3 of 3)
 
 What is proved here (every statement complete, nothing assumed):
 * **Keys sorted and unique by construction.** `mkObj`, `setObjVal!`, `mergeObj` and `SMap.insert` yield maps whose keys are strictly increasing, hence pairwise distinct (`mkObj_keys_sorted_unique`, `setObjVal!_keys_sorted_unique`,
@@ -9,8 +9,10 @@ What is proved here (every statement complete, nothing assumed):
   (so no escape sequence is ever written). Stronger, `compress` is prefix-free on that class (`compress_prefix_free`: `compress a ++ r = compress b ++ r'` gives `a = b` and `r = r'`).
 * **The parse round trip on the small values** (slice d2; `round_small`): `parse (compress v) = .ok v` for `Small v`: `null`, `bool b`, `str s` (EVERY string, escapes included: `strLoop_flat` reads back what `escape` wrote, one
   character at a time, the control characters through `\u00XX`), the empty array and the empty object, each with a witness (`round_witness_str`, `round_witness_empty` and the `#guard`s).
-Not here (later slices of the work): the round trip of a NUMBER (`num n`, the next slice d3: the digits `Int.repr` writes, the fraction and exponent `JsonNumber.toString` writes, read back by `Parser.num`) and of arrays and objects of
-length one or more (nesting; slice d3 or later, by induction through `arrLoop` and `objLoop`); injectivity with numbers (two numbers can print alike, `⟨10, 1⟩` and `⟨1, 0⟩` both as `1`, so the class excludes them) and with escapes. -/
+* **The round trip on nested arrays and objects of every depth** (slice d3; `round_nested`): `parse (compress v) = .ok v` for `Round v`: no number node anywhere, every object's keys strictly increasing (`SMap.WF`, which `mkObj`,
+  `insert` and `parse` always give), strings and keys arbitrary. By induction on the value (`round_valOK`, one step per level through `arrLoop_ok` and `objLoop_ok`, which carry the position and fuel; `ValOK` says a value reads
+  back inside any text that holds its characters followed by nothing or a non-whitespace character); no bound on the depth or the length. Witness: `round_witness_nested` (`nestedW`, several levels, escapes, empty members).
+Not here (later work): the round trip of a NUMBER (`num n`: the digits `Int.repr` writes, the fraction and exponent `JsonNumber.toString` writes, read back by `Parser.num`) and so of any value containing one; injectivity with numbers (two numbers can print alike, `⟨10, 1⟩` and `⟨1, 0⟩` both as `1`, so the class excludes them) and with escapes. -/
 namespace LeanJsonProofs.CompatRound
 open LeanJson.Compat LeanJson.Compat.Json
 
@@ -658,5 +660,400 @@ theorem round_witness_empty : parse (str "").compress = .ok (str "") := round_sm
 #guard (match parse (obj ⟨[]⟩).compress with | .ok (.obj m) => m.entries.isEmpty | _ => false)
 #guard (match parse (arr #[]).compress with | .ok (.arr a) => a.isEmpty | _ => false)
 #guard (match parse (bool false).compress with | .ok (.bool false) => true | _ => false)
+
+
+/-! ## Nested arrays and objects (slice d3) -/
+
+/-- What may follow a value in a text: nothing, or a character that is not whitespace. -/
+def Term (R : List Char) : Prop := ∀ c, R.head? = some c → Parser.isWsChar c = false
+
+theorem skipWs_term {a : Array Char} {i : Nat} {R : List Char} (h : a.toList.drop i = R) (hT : Term R) : Parser.skipWs a i = i := by
+  by_cases hi : i < a.size
+  · have hh : a[i]? = R.head? := by rw [← h]; simp [List.head?_drop]
+    cases hR : R.head? with
+    | none => rw [hR] at hh; rw [Array.getElem?_eq_getElem hi] at hh; cases hh
+    | some c => exact skipWs_stop a i c (by rw [hh, hR]) (hT c hR)
+  · exact skipWs_oob a i hi
+
+theorem term_nil : Term [] := fun c h => by simp at h
+theorem term_cons (c : Char) (R : List Char) (h : Parser.isWsChar c = false) : Term (c :: R) := fun d hd => by
+  simp at hd; subst hd; exact h
+
+/-- The first character of the text of a value without numbers: not whitespace, not a closer or a comma. -/
+theorem cs_hd (v : Json) (hv : v = null ∨ (∃ b, v = bool b) ∨ (∃ s, v = str s) ∨ (∃ es, v = arr es) ∨ (∃ m, v = obj m)) :
+    ∃ c t, cs v = c :: t ∧ Parser.isWsChar c = false ∧ c ≠ ']' ∧ c ≠ '}' ∧ c ≠ ',' := by
+  rcases hv with rfl | ⟨b, rfl⟩ | ⟨s, rfl⟩ | ⟨es, rfl⟩ | ⟨m, rfl⟩
+  · exact ⟨_, _, cs_null, by decide, by decide, by decide, by decide⟩
+  · cases b <;> simp [cs_bool] <;> decide
+  · exact ⟨_, _, by rw [cs_str]; rfl, by decide, by decide, by decide, by decide⟩
+  · exact ⟨_, _, cs_arr es, by decide, by decide, by decide, by decide⟩
+  · exact ⟨_, _, cs_obj m, by decide, by decide, by decide, by decide⟩
+
+/-- The values the round trip is proved for: no number node; every object's keys strictly increasing. -/
+inductive Round : Json → Prop
+  | null : Round Json.null
+  | bool (b : Bool) : Round (Json.bool b)
+  | str (s : String) : Round (Json.str s)
+  | arr (es : Array Json) : (∀ e ∈ es, Round e) → Round (Json.arr es)
+  | obj (m : SMap Json) : m.WF → (∀ p ∈ m.entries, Round p.2) → Round (Json.obj m)
+
+theorem round_shape {v : Json} (h : Round v) :
+    v = null ∨ (∃ b, v = bool b) ∨ (∃ s, v = str s) ∨ (∃ es, v = arr es) ∨ (∃ m, v = obj m) := by
+  cases h with
+  | null => exact Or.inl rfl
+  | bool b => exact Or.inr (Or.inl ⟨b, rfl⟩)
+  | str s => exact Or.inr (Or.inr (Or.inl ⟨s, rfl⟩))
+  | arr es _ => exact Or.inr (Or.inr (Or.inr (Or.inl ⟨es, rfl⟩)))
+  | obj m _ _ => exact Or.inr (Or.inr (Or.inr (Or.inr ⟨m, rfl⟩)))
+
+theorem term_cs {v : Json} (h : Round v) (R : List Char) : Term (cs v ++ R) := by
+  obtain ⟨c, t, e, hw, -⟩ := cs_hd v (round_shape h)
+  rw [e]; exact term_cons c _ hw
+
+/-- One value reads back at any position of any text that has its characters there, followed by nothing or a non-whitespace character, given enough fuel. -/
+def ValOK (v : Json) : Prop :=
+  ∀ (a : Array Char) (i : Nat) (R : List Char) (F : Nat), a.toList.drop i = cs v ++ R → Term R → (cs v).length ≤ F →
+    Parser.val F a i = .ok (v, i + (cs v).length)
+
+theorem litAt_of_drop (a : Array Char) : ∀ (L R : List Char) (i : Nat), a.toList.drop i = L ++ R → Parser.litAt a i L = true
+  | [], R, i, _ => rfl
+  | c :: t, R, i, h => by
+    have h0 : a[i + 0]? = some c := by rw [get_of_drop (L := c :: (t ++ R)) (by simpa using h) 0]; rfl
+    have h1 : a.toList.drop (i + 1) = t ++ R := drop_of_drop (pre := [c]) (by simpa using h)
+    simp only [Parser.litAt, Nat.add_zero] at h0 ⊢
+    rw [h0, litAt_of_drop a t R (i + 1) h1]; simp
+
+theorem get_first {a : Array Char} {i : Nat} {c : Char} {t : List Char} (h : a.toList.drop i = c :: t) : a[i]? = some c := by
+  simpa using get_of_drop (a := a) (i := i) (L := c :: t) h 0
+
+theorem valOK_null : ValOK null := by
+  intro a i R F h hT hF
+  rw [cs_null] at h hF
+  obtain ⟨f, rfl⟩ : ∃ f, F = f + 1 := ⟨F - 1, by simp at hF; omega⟩
+  have g0 := get_first (a := a) (i := i) (by simpa using h)
+  have hl := litAt_of_drop a ['n', 'u', 'l', 'l'] R i (by simpa using h)
+  have hs := skipWs_term (a := a) (i := i + 4) (R := R) (by simpa [cs_null] using drop_of_drop (pre := ['n', 'u', 'l', 'l']) (by simpa using h)) hT
+  simp [Parser.val, g0, hl, hs, cs_null]
+  rfl
+
+theorem valOK_bool (b : Bool) : ValOK (bool b) := by
+  intro a i R F h hT hF
+  rw [cs_bool] at h hF
+  cases b
+  · simp only [Bool.false_eq_true, ite_false] at h hF
+    obtain ⟨f, rfl⟩ : ∃ f, F = f + 1 := ⟨F - 1, by simp at hF; omega⟩
+    have g0 := get_first (a := a) (i := i) (by simpa using h)
+    have hl := litAt_of_drop a ['f', 'a', 'l', 's', 'e'] R i (by simpa using h)
+    have hs := skipWs_term (a := a) (i := i + 5) (R := R) (drop_of_drop (pre := ['f', 'a', 'l', 's', 'e']) (by simpa using h)) hT
+    simp [Parser.val, g0, hl, hs, cs_bool]
+    rfl
+  · simp only [ite_true] at h hF
+    obtain ⟨f, rfl⟩ : ∃ f, F = f + 1 := ⟨F - 1, by simp at hF; omega⟩
+    have g0 := get_first (a := a) (i := i) (by simpa using h)
+    have hl := litAt_of_drop a ['t', 'r', 'u', 'e'] R i (by simpa using h)
+    have hs := skipWs_term (a := a) (i := i + 4) (R := R) (drop_of_drop (pre := ['t', 'r', 'u', 'e']) (by simpa using h)) hT
+    simp [Parser.val, g0, hl, hs, cs_bool]
+    rfl
+
+theorem valOK_str (s : String) : ValOK (str s) := by
+  intro a i R F h hT hF
+  rw [cs_str] at h hF
+  obtain ⟨f, rfl⟩ : ∃ f, F = f + 1 := ⟨F - 1, by simp [rsL] at hF; omega⟩
+  have hlen : (rsL s).length = (s.toList.flatMap ec).length + 2 := by simp [rsL]
+  have hd : a.toList.drop i = '"' :: (s.toList.flatMap ec ++ '"' :: R) := by simpa [rsL] using h
+  have g0 := get_first hd
+  have hd1 : a.toList.drop (i + 1) = s.toList.flatMap ec ++ '"' :: R := drop_of_drop (pre := ['"']) (by simpa using hd)
+  have hsz : (s.toList.flatMap ec).length + 1 + i ≤ a.size := by
+    have := congrArg List.length hd1
+    simp only [List.length_drop, Array.length_toList, List.length_append, List.length_cons] at this
+    omega
+  have := strLoop_flat a R s.toList (a.size + 1) (i + 1) "" hd1 (by have := len_le_flat s.toList; omega)
+  have hs : Parser.skipWs a (i + 1 + (s.toList.flatMap ec).length + 1) = i + 1 + (s.toList.flatMap ec).length + 1 :=
+    skipWs_term (R := R) (by
+      have := drop_of_drop (a := a) (i := i + 1) (pre := s.toList.flatMap ec ++ ['"']) (by simpa using hd1)
+      simpa [Nat.add_assoc] using this) hT
+  simp only [Parser.val, g0]
+  rw [this]
+  simp only [bind, Except.bind, String.empty_append, String.ofList_toList]
+  rw [hs]
+  simp only [cs_str, hlen, pure, Except.pure]
+  rw [show i + 1 + (List.flatMap ec s.toList).length + 1 = i + ((List.flatMap ec s.toList).length + 2) by omega]
+
+theorem drop_first {a : Array Char} {i : Nat} {c : Char} {t : List Char} (h : a.toList.drop i = c :: t) : a.toList.drop (i + 1) = t :=
+  drop_of_drop (pre := [c]) (by simpa using h)
+
+theorem arrLoop_ok (a : Array Char) (R : List Char) (hT : Term R) :
+    ∀ (l : List Json) (x : Json) (f i : Nat) (acc : Array Json),
+    (∀ y ∈ x :: l, Round y ∧ ValOK y) →
+    a.toList.drop i = cs x ++ commL cs l ++ ']' :: R →
+    (cs x ++ commL cs l).length + 1 ≤ f →
+    Parser.arrLoop f a i acc = .ok (acc ++ (x :: l).toArray, i + (cs x ++ commL cs l).length + 1)
+  | [], x, f, i, acc, hg, hd, hf => by
+    obtain ⟨f', rfl⟩ : ∃ f', f = f' + 1 := ⟨f - 1, by omega⟩
+    simp only [commL, List.append_nil, List.append_assoc] at hd hf
+    have hx := (hg x List.mem_cons_self).2 a i (']' :: R) f' hd (term_cons _ _ (by decide)) (by omega)
+    have hd1 : a.toList.drop (i + (cs x).length) = ']' :: R := drop_of_drop hd
+    have g1 := get_first hd1
+    have hs := skipWs_term (a := a) (i := i + (cs x).length + 1) (R := R) (drop_first hd1) hT
+    simp only [Parser.arrLoop]
+    rw [hx]
+    simp only [bind, Except.bind, g1, pure, Except.pure, hs, commL, List.append_nil]
+    simp
+  | y :: t, x, f, i, acc, hg, hd, hf => by
+    obtain ⟨f', rfl⟩ : ∃ f', f = f' + 1 := ⟨f - 1, by omega⟩
+    simp only [commL, List.append_assoc, List.cons_append] at hd hf
+    have hx := (hg x List.mem_cons_self).2 a i (',' :: (cs y ++ commL cs t ++ ']' :: R)) f' (by simpa using hd)
+      (term_cons _ _ (by decide)) (by simp at hf; omega)
+    have hd1 : a.toList.drop (i + (cs x).length) = ',' :: (cs y ++ (commL cs t ++ ']' :: R)) := drop_of_drop (by simpa using hd)
+    have g1 := get_first hd1
+    have hd2 : a.toList.drop (i + (cs x).length + 1) = cs y ++ commL cs t ++ ']' :: R := by
+      simpa [List.append_assoc] using drop_first hd1
+    have hs := skipWs_term (a := a) (i := i + (cs x).length + 1) (R := cs y ++ commL cs t ++ ']' :: R) hd2
+      (by simpa [List.append_assoc] using term_cs (hg y (List.mem_cons_of_mem _ List.mem_cons_self)).1 (commL cs t ++ ']' :: R))
+    have ih := arrLoop_ok a R hT t y f' (i + (cs x).length + 1) (acc.push x)
+      (fun z hz => hg z (by simp at hz ⊢; rcases hz with h | h <;> simp [h])) hd2 (by simp at hf ⊢; omega)
+    simp only [Parser.arrLoop]
+    rw [hx]
+    simp only [bind, Except.bind, g1, pure, Except.pure, hs]
+    rw [ih]
+    simp [commL]
+    omega
+
+theorem valOK_arr (es : Array Json) (hg : ∀ e ∈ es, Round e ∧ ValOK e) : ValOK (arr es) := by
+  intro a i R F h hT hF
+  rw [cs_arr] at h hF
+  obtain ⟨l⟩ := es
+  simp only [List.toList_toArray] at h hF
+  have hg' : ∀ y ∈ l, Round y ∧ ValOK y := fun y hy => hg y (Array.mem_def.2 (by simpa using hy))
+  have hd0 : a.toList.drop i = '[' :: (sepL cs l ++ ']' :: R) := by simpa using h
+  have g0 := get_first hd0
+  have hd1 : a.toList.drop (i + 1) = sepL cs l ++ ']' :: R := drop_first hd0
+  obtain ⟨f, rfl⟩ : ∃ f, F = f + 1 := ⟨F - 1, by simp at hF; omega⟩
+  cases l with
+  | nil =>
+    simp only [sepL, List.nil_append] at hd1 hF
+    have hs := skipWs_term (a := a) (i := i + 1) (R := ']' :: R) hd1 (term_cons _ _ (by decide))
+    have g1 := get_first hd1
+    have hs2 := skipWs_term (a := a) (i := i + 1 + 1) (R := R) (drop_first hd1) hT
+    simp only [Parser.val, g0, hs, g1, hs2, pure, Except.pure, cs_arr, sepL]
+    simp [Nat.add_assoc]
+  | cons x t =>
+    simp only [sepL] at hd1 hF
+    obtain ⟨c, t', hc, hw, hr, -⟩ := cs_hd x (round_shape (hg' x List.mem_cons_self).1)
+    have hd2 : a.toList.drop (i + 1) = cs x ++ commL cs t ++ ']' :: R := by simpa [List.append_assoc] using hd1
+    have hs := skipWs_term (a := a) (i := i + 1) (R := cs x ++ commL cs t ++ ']' :: R) hd2
+      (by simpa using term_cs (hg' x List.mem_cons_self).1 (commL cs t ++ ']' :: R))
+    have g1 : a[i + 1]? = some c := get_first (by rw [hd2, hc]; rfl)
+    have ha := arrLoop_ok a R hT t x f (i + 1) #[] hg' hd2 (by simp at hF ⊢; omega)
+    simp only [Parser.val, g0, hs, g1, hr]
+    rw [ha]
+    simp only [bind, Except.bind, pure, Except.pure]
+    have hl : (cs (arr ⟨x :: t⟩)).length = (cs x ++ commL cs t).length + 2 := by
+      rw [cs_arr]; simp [sepL]; omega
+    rw [hl]
+    simp only [Array.empty_append, List.append_nil]
+    congr 2
+    omega
+
+/-! ### Objects -/
+
+theorem insertEntry_append {α : Type} (k : String) (v : α) :
+    ∀ l : List (String × α), (∀ p ∈ l, p.1 < k) → SMap.insertEntry k v l = l ++ [(k, v)]
+  | [], _ => rfl
+  | (k', v') :: t, h => by
+    have h1 : k' < k := h _ List.mem_cons_self
+    have h2 : ¬ k < k' := fun hh => String.lt_irrefl _ (String.lt_trans hh h1)
+    have h3 : k ≠ k' := fun hh => String.lt_irrefl _ (hh ▸ h1)
+    simp only [SMap.insertEntry, h2, h3, ite_false, List.cons_append, List.cons.injEq, true_and]
+    exact insertEntry_append k v t (fun p hp => h p (List.mem_cons_of_mem _ hp))
+
+/-- The characters of one member of an object. -/
+def ET (p : String × Json) : List Char := rsL p.1 ++ ':' :: cs p.2
+
+/-- The key, the colon and the value of one member read back: the facts the step of `objLoop` needs. -/
+theorem entry_ok (a : Array Char) (k : String) (v : Json) (hv : Round v) (hok : ValOK v) (F i : Nat) (Q : List Char) (hQ : Term Q)
+    (hd : a.toList.drop i = rsL k ++ ':' :: (cs v ++ Q)) (hF : (cs v).length ≤ F) :
+    a[i]? = some '"' ∧ ∃ j0, Parser.strLoop (a.size + 1) a (i + 1) "" = .ok (k, j0) ∧ Parser.skipWs a j0 = j0 ∧ a[j0]? = some ':' ∧
+      Parser.skipWs a (j0 + 1) = j0 + 1 ∧ Parser.val F a (j0 + 1) = .ok (v, j0 + 1 + (cs v).length) ∧
+      j0 + 1 + (cs v).length = i + (ET (k, v)).length ∧ a.toList.drop (j0 + 1 + (cs v).length) = Q := by
+  have hd0 : a.toList.drop i = '"' :: (k.toList.flatMap ec ++ '"' :: (':' :: (cs v ++ Q))) := by simpa [rsL] using hd
+  have g0 := get_first hd0
+  have hd1 : a.toList.drop (i + 1) = k.toList.flatMap ec ++ '"' :: (':' :: (cs v ++ Q)) := drop_first hd0
+  have hsz : (k.toList.flatMap ec).length + 1 + i ≤ a.size := by
+    have := congrArg List.length hd1
+    simp only [List.length_drop, Array.length_toList, List.length_append, List.length_cons] at this
+    omega
+  have hs := strLoop_flat a (':' :: (cs v ++ Q)) k.toList (a.size + 1) (i + 1) "" hd1 (by have := len_le_flat k.toList; omega)
+  have hd2 : a.toList.drop (i + 1 + (k.toList.flatMap ec).length + 1) = ':' :: (cs v ++ Q) := by
+    have := drop_of_drop (a := a) (i := i + 1) (pre := k.toList.flatMap ec ++ ['"']) (by simpa using hd1)
+    simpa [Nat.add_assoc] using this
+  have hd3 : a.toList.drop (i + 1 + (k.toList.flatMap ec).length + 1 + 1) = cs v ++ Q := drop_first hd2
+  refine ⟨g0, i + 1 + (k.toList.flatMap ec).length + 1, by simpa using hs, skipWs_term hd2 (term_cons _ _ (by decide)), get_first hd2,
+    skipWs_term hd3 (term_cs hv Q), hok a _ Q F hd3 hQ hF, ?_, ?_⟩
+  · simp [ET, rsL]; omega
+  · simpa using drop_of_drop (pre := cs v) hd3
+
+theorem term_et (p : String × Json) (R : List Char) : Term (ET p ++ R) := by
+  unfold ET rsL
+  exact term_cons _ _ (by decide)
+
+theorem objLoop_ok (a : Array Char) (R : List Char) (hT : Term R) :
+    ∀ (l : List (String × Json)) (x : String × Json) (f i : Nat) (m : SMap Json),
+    (x :: l).Pairwise (fun p q => p.1 < q.1) → (∀ p ∈ m.entries, ∀ q ∈ x :: l, p.1 < q.1) →
+    (∀ p ∈ x :: l, Round p.2 ∧ ValOK p.2) →
+    a.toList.drop i = ET x ++ commL ET l ++ '}' :: R →
+    (ET x ++ commL ET l).length + 1 ≤ f →
+    Parser.objLoop f a i m = .ok (⟨m.entries ++ x :: l⟩, i + (ET x ++ commL ET l).length + 1)
+  | [], x, f, i, m, hp, hm, hg, hd, hf => by
+    obtain ⟨f', rfl⟩ : ∃ f', f = f' + 1 := ⟨f - 1, by omega⟩
+    simp only [commL, List.append_nil, List.append_assoc] at hd hf
+    have hlen : (ET x).length = (rsL x.1).length + 1 + (cs x.2).length := by simp [ET]; omega
+    obtain ⟨g0, j0, hs, hw, hc, hw2, hv, hj, hdq⟩ := entry_ok a x.1 x.2 (hg x List.mem_cons_self).1 (hg x List.mem_cons_self).2 f' i
+      ('}' :: R) (term_cons _ _ (by decide)) (by simpa [ET, List.append_assoc] using hd) (by omega)
+    have g1 := get_first hdq
+    have hs2 := skipWs_term (a := a) (i := j0 + 1 + (cs x.2).length + 1) (R := R) (drop_first hdq) hT
+    have hins : m.insert x.1 x.2 = ⟨m.entries ++ [x]⟩ := by
+      simp only [SMap.insert]
+      rw [insertEntry_append]
+      intro p hp; exact hm p hp x List.mem_cons_self
+    simp only [Parser.objLoop, g0, beq_self_eq_true, ite_true, hs, bind, Except.bind, hw, hc, hw2, hv, hins, g1, pure, Except.pure, hs2]
+    have hj' : j0 + 1 + (cs x.2).length = i + (ET x).length := hj
+    simp only [commL, List.append_nil]
+    congr 2
+    omega
+  | y :: t, x, f, i, m, hp, hm, hg, hd, hf => by
+    obtain ⟨f', rfl⟩ : ∃ f', f = f' + 1 := ⟨f - 1, by omega⟩
+    simp only [commL, List.append_assoc, List.cons_append] at hd hf
+    have hlen : (ET x).length = (rsL x.1).length + 1 + (cs x.2).length := by simp [ET]; omega
+    obtain ⟨g0, j0, hs, hw, hc, hw2, hv, hj, hdq⟩ := entry_ok a x.1 x.2 (hg x List.mem_cons_self).1 (hg x List.mem_cons_self).2 f' i
+      (',' :: (ET y ++ (commL ET t ++ '}' :: R))) (term_cons _ _ (by decide)) (by simpa [ET, List.append_assoc] using hd) (by simp at hf; omega)
+    have g1 := get_first hdq
+    have hd2 : a.toList.drop (j0 + 1 + (cs x.2).length + 1) = ET y ++ commL ET t ++ '}' :: R := by
+      simpa [List.append_assoc] using drop_first hdq
+    have hs2 := skipWs_term (a := a) (R := ET y ++ commL ET t ++ '}' :: R) hd2 (by simpa [List.append_assoc] using term_et y (commL ET t ++ '}' :: R))
+    have hins : m.insert x.1 x.2 = ⟨m.entries ++ [x]⟩ := by
+      simp only [SMap.insert]
+      rw [insertEntry_append]
+      intro p hp; exact hm p hp x List.mem_cons_self
+    have hp' := List.pairwise_cons.1 hp
+    have ih := objLoop_ok a R hT t y f' (j0 + 1 + (cs x.2).length + 1) ⟨m.entries ++ [x]⟩
+      hp'.2 (by
+        intro p hpm q hq
+        simp only [List.mem_append, List.mem_singleton] at hpm
+        rcases hpm with hpm | rfl
+        · exact hm p hpm q (List.mem_cons_of_mem _ hq)
+        · exact hp'.1 q hq)
+      (fun z hz => hg z (List.mem_cons_of_mem _ hz)) hd2 (by simp at hf ⊢; omega)
+    simp only [Parser.objLoop, g0, beq_self_eq_true, ite_true, hs, bind, Except.bind, hw, hc, hw2, hv, hins, g1, pure, Except.pure, hs2]
+    rw [ih]
+    have hj' : j0 + 1 + (cs x.2).length = i + (ET x).length := hj
+    simp only [commL, List.length_append, List.length_cons, List.append_assoc, List.cons_append]
+    congr 2
+    omega
+
+theorem valOK_obj (m : SMap Json) (hw : m.WF) (hg : ∀ p ∈ m.entries, Round p.2 ∧ ValOK p.2) : ValOK (obj m) := by
+  intro a i R F h hT hF
+  have hc : cs (obj m) = '{' :: (sepL ET m.entries ++ ['}']) := cs_obj m
+  rw [hc] at h hF
+  obtain ⟨l⟩ := m
+  dsimp only at h hF hg hw hc
+  have hd0 : a.toList.drop i = '{' :: (sepL ET l ++ '}' :: R) := by simpa using h
+  have g0 := get_first hd0
+  have hd1 : a.toList.drop (i + 1) = sepL ET l ++ '}' :: R := drop_first hd0
+  obtain ⟨f, rfl⟩ : ∃ f, F = f + 1 := ⟨F - 1, by simp at hF; omega⟩
+  cases l with
+  | nil =>
+    simp only [sepL, List.nil_append] at hd1 hF
+    have hs := skipWs_term (a := a) (i := i + 1) (R := '}' :: R) hd1 (term_cons _ _ (by decide))
+    have g1 := get_first hd1
+    have hs2 := skipWs_term (a := a) (i := i + 1 + 1) (R := R) (drop_first hd1) hT
+    simp only [Parser.val, g0, hs, g1, hs2, pure, Except.pure, cs_obj, sepL]
+    simp [Nat.add_assoc]
+    rfl
+  | cons x t =>
+    simp only [sepL] at hd1 hF
+    have hd2 : a.toList.drop (i + 1) = ET x ++ commL ET t ++ '}' :: R := by simpa [List.append_assoc] using hd1
+    have hs := skipWs_term (a := a) (i := i + 1) (R := ET x ++ commL ET t ++ '}' :: R) hd2
+      (by simpa [List.append_assoc] using term_et x (commL ET t ++ '}' :: R))
+    have g1 : a[i + 1]? = some '"' := get_first (t := x.1.toList.flatMap ec ++ '"' :: ':' :: (cs x.2 ++ (commL ET t ++ '}' :: R)))
+      (by rw [hd2]; simp [ET, rsL])
+    have hwf : (x :: t).Pairwise (fun p q => p.1 < q.1) := hw
+    have ha := objLoop_ok a R hT t x f (i + 1) SMap.empty hwf (by simp [SMap.empty]) hg hd2 (by simp at hF ⊢; omega)
+    simp only [Parser.val, g0, hs, g1]
+    rw [ha]
+    simp only [bind, Except.bind, pure, Except.pure, SMap.empty, List.nil_append]
+    have hl : (cs (obj ⟨x :: t⟩)).length = (ET x ++ commL ET t).length + 2 := by
+      rw [hc]; simp [sepL]; omega
+    rw [hl]
+    show Except.ok (obj ⟨x :: t⟩, i + 1 + (ET x ++ commL ET t).length + 1) = _
+    congr 2
+    omega
+
+theorem round_valOK : ∀ (v : Json), Round v → ValOK v
+  | .null, _ => valOK_null
+  | .bool b, _ => valOK_bool b
+  | .str s, _ => valOK_str s
+  | .arr es, h => by
+    cases h with
+    | arr _ hg => exact valOK_arr es (fun e he => ⟨hg e he, round_valOK e (hg e he)⟩)
+  | .obj m, h => by
+    cases h with
+    | obj _ hw hg => exact valOK_obj m hw (fun p hp => ⟨hg p hp, round_valOK p.2 (hg p hp)⟩)
+termination_by v => sizeOf v
+decreasing_by
+  all_goals simp_wf
+  all_goals first
+    | (have := sizeOf_arr_mem he; omega)
+    | (have := sizeOf_obj_mem (m := m) hp; omega)
+
+/-- **The round trip on nested arrays and objects of every depth**: `parse (compress v) = .ok v` for every `Round` value: no number node, objects with strictly increasing keys (what every builder and `parse` yield);
+strings and keys arbitrary. By induction on the value (`round_valOK`, through `arrLoop_ok` and `objLoop_ok`). -/
+theorem round_nested {v : Json} (h : Round v) : parse v.compress = .ok v := by
+  rw [cs_text]
+  obtain ⟨c, t, hc, hw, -⟩ := cs_hd v (round_shape h)
+  exact parse_of_val _ _ c (by rw [hc]; rfl) hw (fun f hf => by
+    have := round_valOK v h (cs v).toArray 0 [] (4 * (cs v).length + 4) (by simp) term_nil (by omega)
+    rw [hf] at this
+    simpa using this)
+
+/-! Witnesses: a nested value (arrays in objects in arrays, an empty array and object, escapes in strings and keys, keys in `mkObj` order) is `Round`, so it reads back by the theorem and by evaluation. -/
+
+theorem round_of_mkObj (o : List (String × Json)) (h : ∀ p ∈ SMap.ofList o |>.entries, Round p.2) : Round (mkObj o) :=
+  Round.obj _ (SMap.wf_ofList o) h
+
+def nestedW : Json := arr #[null, obj ⟨[("a\"b", arr #[bool true, arr #[], str "x\ny"]), ("c", obj ⟨[]⟩), ("d", obj ⟨[("e", arr #[arr #[null]])]⟩)]⟩, str "😀"]
+
+theorem round_nested_witness : Round nestedW := by
+  refine Round.arr _ ?_
+  intro e he
+  simp only [nestedW, Array.mem_def, List.toList_toArray, List.mem_cons, List.not_mem_nil, or_false] at he
+  rcases he with rfl | rfl | rfl
+  · exact Round.null
+  · refine Round.obj _ (by simp only [SMap.WF]; decide) ?_
+    intro p hp
+    simp only [List.mem_cons, List.not_mem_nil, or_false] at hp
+    rcases hp with rfl | rfl | rfl
+    · refine Round.arr _ ?_
+      intro e he
+      simp only [Array.mem_def, List.toList_toArray, List.mem_cons, List.not_mem_nil, or_false] at he
+      rcases he with rfl | rfl | rfl
+      · exact Round.bool true
+      · exact Round.arr _ (by intro e he; simp at he)
+      · exact Round.str _
+    · exact Round.obj _ (List.Pairwise.nil) (by intro p hp; simp at hp)
+    · refine Round.obj _ (by simp only [SMap.WF]; decide) ?_
+      intro p hp
+      simp only [List.mem_singleton] at hp
+      subst hp
+      refine Round.arr _ (fun e he => ?_)
+      simp only [Array.mem_def, List.toList_toArray, List.mem_singleton] at he
+      subst he
+      exact Round.arr _ (fun e he => by simp only [Array.mem_def, List.toList_toArray, List.mem_singleton] at he; subst he; exact Round.null)
+  · exact Round.str _
+
+theorem round_witness_nested : parse nestedW.compress = .ok nestedW := round_nested round_nested_witness
+
+#guard (match parse nestedW.compress with | .ok v => v.compress == nestedW.compress | _ => false)
+#guard nestedW.compress = "[null,{\"a\\\"b\":[true,[],\"x\\ny\"],\"c\":{},\"d\":{\"e\":[[null]]}},\"😀\"]"
 
 end LeanJsonProofs.CompatRound
